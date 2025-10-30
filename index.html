@@ -12,7 +12,6 @@
         }
         .chart-container-trend { position: relative; width: 100%; height: 350px; }
         .chart-container-scatter { position: relative; width: 100%; height: 400px; }
-        /* (V13) 新增：總覽分佈圖高度 */
         .chart-container-distribution { position: relative; width: 100%; height: 300px; }
         
         .status-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; margin-right: 8px; }
@@ -108,7 +107,7 @@
         <!-- (V11) 右側主內容區 -->
         <main class="flex-1 p-8 overflow-y-auto" id="mainContent">
             
-            <!-- (V13) 新增：總覽儀表板 (取代 Welcome) -->
+            <!-- (V13) 總覽儀表板 -->
             <div id="overallDashboardPage" class="hidden">
                 <!-- 1. 總覽標題 -->
                 <h2 id="overallDashboardTitle" class="text-3xl font-bold text-gray-900 mb-6">總覽儀表板</h2>
@@ -156,15 +155,15 @@
                     
                     <!-- 3b. 需關注列表 -->
                     <section class="bg-white p-6 rounded-lg shadow-md">
-                        <h3 class="text-xl font-bold mb-4 text-gray-800">Top 5 / Bottom 5 考官</h3>
+                        <h3 class="text-xl font-bold mb-4 text-gray-800">考官表現</h3>
                         <div class="space-y-4">
                             <div>
-                                <h4 class="font-semibold text-green-700">高穩定性考官 (Top 5)</h4>
+                                <h4 class="font-semibold text-green-700">高穩定性考官 (Top 5 / $r \ge 0.7$)</h4>
                                 <ul id="topExaminersList" class="mt-2 space-y-2"></ul>
                             </div>
                             <hr>
                             <div>
-                                <h4 class="font-semibold text-red-700">需關注考官 (Bottom 5)</h4>
+                                <h4 class="font-semibold text-red-700">需關注考官 (Bottom 5 / $r < 0.7$)</h4>
                                 <ul id="bottomExaminersList" class="mt-2 space-y-2"></ul>
                             </div>
                         </div>
@@ -174,6 +173,7 @@
             
             <!-- 考官趨勢頁面 -->
             <div id="examinerTrendPage" class="hidden">
+                <!-- ... (考官趨勢頁面的其餘 HTML 內容保持不變) ... -->
                 <div class="bg-white p-6 rounded-lg shadow mb-6">
                     <div class="flex justify-between items-start">
                         <h2 id="trend_examinerName" class="text-3xl font-bold text-gray-900"></h2>
@@ -214,6 +214,7 @@
             
             <!-- (V11) 場次總覽頁面 -->
             <div id="sessionSummaryPage" class="hidden">
+                <!-- ... (場次總覽頁面的其餘 HTML 內容保持不變) ... -->
                 <h2 id="summary_date" class="text-3xl font-bold text-gray-900 mb-6"></h2>
                 <div id="sessionSummaryStations" class="space-y-6">
                 </div>
@@ -221,6 +222,7 @@
 
             <!-- (V12) 單一場次詳細頁面 -->
             <div id="sessionDetailPage" class="hidden">
+                <!-- ... (單一場次詳細頁面的其餘 HTML 內容保持不變) ... -->
                 <button id="backButton" class="mb-4 text-blue-600 hover:text-blue-800 font-medium">
                     &larr; 返回
                 </button>
@@ -301,7 +303,7 @@
         
         let trendChartInstance = null; 
         let sessionChartInstance = null;
-        let rDistributionChartInstance = null; // (V13) 新增
+        let rDistributionChartInstance = null; 
         
         const COLORS = { BRIGHT_GREEN: '#10B981', GREEN: '#28a745', YELLOW: '#ffc107', ORANGE: '#F59E0B', RED: '#dc3545', GRAY: '#6c757d' };
         const STATUS_CLASSES = { BRIGHT_GREEN: 'status-bright-green', GREEN: 'status-green', YELLOW: 'status-yellow', ORANGE: 'status-orange', RED: 'status-red', GRAY: 'status-gray' };
@@ -312,7 +314,6 @@
         const sessionMasterListContainerEl = document.getElementById('sessionMasterListContainer');
         const sessionMasterListEl = document.getElementById('sessionMasterList');
         const loadingMessageEl = document.getElementById('loadingMessage');
-        // (V13) 移除 welcomeMessageEl, 改用 overallDashboardPageEl
         const overallDashboardPageEl = document.getElementById('overallDashboardPage'); 
         const examinerTrendPageEl = document.getElementById('examinerTrendPage');
         const sessionSummaryPageEl = document.getElementById('sessionSummaryPage');
@@ -394,12 +395,12 @@
          * (V13) 顯示特定頁面
          */
         function showPage(pageId) {
-            overallDashboardPageEl.classList.add('hidden'); // (V13)
+            overallDashboardPageEl.classList.add('hidden');
             examinerTrendPageEl.classList.add('hidden');
             sessionSummaryPageEl.classList.add('hidden');
             sessionDetailPageEl.classList.add('hidden');
             
-            if (pageId === 'overallDashboard') overallDashboardPageEl.classList.remove('hidden'); // (V13)
+            if (pageId === 'overallDashboard') overallDashboardPageEl.classList.remove('hidden');
             if (pageId === 'trend') examinerTrendPageEl.classList.remove('hidden');
             if (pageId === 'summary') sessionSummaryPageEl.classList.remove('hidden');
             if (pageId === 'detail') sessionDetailPageEl.classList.remove('hidden');
@@ -479,20 +480,16 @@
             currentDept = deptFilterEl.value;
             const { filteredExaminerData, filteredSessionSummaryData } = getFilteredData(currentYear, currentDept);
             
-            // 1. (V13) 計算總體 r 值 (移出)
             const allSessionRs = Object.values(filteredExaminerData).flatMap(examiner => 
                 Object.values(examiner.sessions).map(s => 
                     pearsonCorrelation(s.scores.map(sc => sc.global), s.scores.map(sc => sc.total))
                 )
             );
             
-            // 2. 渲染全體平均 R (永遠執行)
             renderOverallAverage(allSessionRs);
 
-            // 3. (V13) 計算考官排序
             const sortedExaminerData = calculateAndSortExaminers(filteredExaminerData);
 
-            // 4. 根據當前視圖渲染左側列表
             if (currentView === 'examiner') {
                 renderExaminerList(sortedExaminerData);
                 examinerMasterListContainerEl.classList.remove('hidden');
@@ -505,15 +502,13 @@
                 sessionMasterListContainerEl.classList.remove('hidden');
             }
             
-            // 5. (V13) 渲染總覽儀表板 (預設頁面)
             renderOverallDashboard(sortedExaminerData, allSessionRs);
             
-            // 6. 顯示總覽頁面
             showPage('overallDashboard');
         }
         
         /**
-         * (V13) 新增：渲染總覽儀表板
+         * (V14) 渲染總覽儀表板 (修正 Top/Bottom 邏輯)
          */
         function renderOverallDashboard(sortedExaminers, allSessionRs) {
             // 1. 更新標題
@@ -545,23 +540,36 @@
                 kpiRAvgIconEl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="${avgRColorHex}"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>`;
             }
 
-            // 3. 渲染 Top/Bottom 5 列表
+            // 3. (V14) 渲染 Top/Bottom 5 列表 (修正邏輯)
             const topListEl = document.getElementById('topExaminersList');
             const bottomListEl = document.getElementById('bottomExaminersList');
             topListEl.innerHTML = '';
             bottomListEl.innerHTML = '';
 
-            const top5 = sortedExaminers.slice(0, 5);
-            top5.forEach(examiner => {
+            // 篩選出 Top 5 (r >= 0.7)
+            const topExaminers = sortedExaminers
+                .filter(e => !isNaN(e.avgR) && e.avgR >= 0.7)
+                .slice(0, 5);
+            
+            topExaminers.forEach(examiner => {
                 topListEl.appendChild(createExaminerListItem(examiner));
             });
-            if(top5.length === 0) topListEl.innerHTML = `<li class="text-sm text-gray-500">無數據</li>`;
+            if(topExaminers.length === 0) {
+                topListEl.innerHTML = `<li class="text-sm text-gray-500">無 $r \ge 0.7$ 的考官</li>`;
+            }
 
-            const bottom5 = sortedExaminers.slice(-5).reverse();
-            bottom5.forEach(examiner => {
+            // 篩選出 Bottom 5 (r < 0.7 或 NaN)，並從低排到高
+            const bottomExaminers = sortedExaminers
+                .filter(e => isNaN(e.avgR) || e.avgR < 0.7) // 取得所有需關注的
+                .slice(-5) // 取得已排序 (高到低) 的最後 5 名 (即最差的 5 名)
+                .reverse(); // 反轉，讓最差的 (r 最低) 在最上面
+                
+            bottomExaminers.forEach(examiner => {
                 bottomListEl.appendChild(createExaminerListItem(examiner));
             });
-            if(bottom5.length === 0) bottomListEl.innerHTML = `<li class="text-sm text-gray-500">無數據</li>`;
+            if(bottomExaminers.length === 0) {
+                bottomListEl.innerHTML = `<li class="text-sm text-gray-500">無 $r < 0.7$ 的考官</li>`;
+            }
 
             // 4. 計算分佈
             const dist = { 'bright-green': 0, 'green': 0, 'yellow': 0, 'orange': 0, 'red': 0, 'gray': 0 };
@@ -639,7 +647,12 @@
                     scales: {
                         x: {
                             beginAtZero: true,
-                            title: { display: true, text: '場次數量' }
+                            title: { display: true, text: '場次數量' },
+                            ticks: {
+                                // (V14) 確保 X 軸為整數
+                                stepSize: 1, 
+                                callback: function(value) { if (Number.isInteger(value)) { return value; } }
+                            }
                         },
                         y: {
                             grid: { display: false }
@@ -845,7 +858,7 @@
             const { filteredExaminerData } = getFilteredData(currentYear, currentDept);
             const data = filteredExaminerData[examinerName];
             if (!data) {
-                showPage('overallDashboard'); // (V13)
+                showPage('overallDashboard');
                 return;
             }
             
@@ -866,7 +879,7 @@
                     date: session.date,
                     station: session.station,
                     key: session.key,
-                    r: r,
+                    r: r, // (V15) 傳遞原始 r (可能為 NaN)
                 };
             });
             
@@ -882,7 +895,7 @@
             if (currentDept !== 'all') filterText = `${filterText} / ${currentDept}`;
             document.getElementById('trend_kpi_session_count_text').textContent = `場 (${filterText})`;
 
-            renderTrendChart(trendData);
+            renderTrendChart(trendData); // (V15) 傳遞包含 NaN 的 trendData
 
             const listEl = document.getElementById('sessionDrillDownList');
             listEl.innerHTML = '';
@@ -948,11 +961,18 @@
             }
         }
 
+        /**
+         * (V15) 修正：渲染趨勢圖
+         */
         function renderTrendChart(trendData) {
             const ctx = document.getElementById('trendChart').getContext('2d');
             if (trendChartInstance) trendChartInstance.destroy();
+            
+            // (V15) 點的顏色： N/A 為灰色
             const pointColors = trendData.map(d => getRColor(d.r, 'hex'));
             const chartLabels = trendData.map(d => formatISODate(d.date));
+            // (V15) 數據：N/A 轉為 0，以便繪製在 Y 軸底部
+            const chartData = trendData.map(d => isNaN(d.r) ? 0 : d.r); 
 
             trendChartInstance = new Chart(ctx, {
                 type: 'line',
@@ -960,16 +980,36 @@
                     labels: chartLabels,
                     datasets: [{
                         label: '相關係數 (r)',
-                        data: trendData.map(d => isNaN(d.r) ? null : d.r),
-                        borderColor: 'rgba(156, 163, 175, 0.5)',
+                        data: chartData, // (V15) 使用轉換後的數據
                         fill: false,
                         tension: 0.1, 
-                        spanGaps: false, 
+                        spanGaps: true, // (V15) 連接 N/A (0) 的點
                         pointRadius: 6,
                         pointHoverRadius: 8,
-                        pointBackgroundColor: pointColors,
+                        pointBackgroundColor: pointColors, // N/A 的點會是灰色
                         pointBorderColor: 'rgba(255, 255, 255, 0.8)',
                         pointBorderWidth: 1,
+                        
+                        // (V15) 新增：線條樣式 (N/A -> Valid 設為虛線)
+                        segment: {
+                            borderColor: (ctx) => {
+                                const p0 = trendData[ctx.p0DataIndex];
+                                const p1 = trendData[ctx.p1DataIndex];
+                                // 檢查前一個點或當前點是否為 N/A
+                                if ((p0 && isNaN(p0.r)) || (p1 && isNaN(p1.r))) {
+                                    return 'rgba(156, 163, 175, 0.7)'; // 虛線使用灰色
+                                }
+                                return 'rgba(156, 163, 175, 0.5)'; // 預設實線顏色
+                            },
+                            borderDash: (ctx) => {
+                                const p0 = trendData[ctx.p0DataIndex];
+                                const p1 = trendData[ctx.p1DataIndex];
+                                if ((p0 && isNaN(p0.r)) || (p1 && isNaN(p1.r))) {
+                                    return [6, 6]; // [虛線長度, 間隔長度]
+                                }
+                                return undefined; // 實線
+                            }
+                        }
                     }]
                 },
                 options: {
@@ -986,6 +1026,11 @@
                                 title: (context) => context[0].label,
                                 label: (context) => `考站: ${trendData[context.dataIndex].station}`,
                                 afterLabel: (context) => {
+                                    // (V15) 讀取原始 r 值來判斷
+                                    const originalR = trendData[context.dataIndex].r;
+                                    if (isNaN(originalR)) {
+                                        return 'r = N/A (數據無效)';
+                                    }
                                     const r = context.parsed.y;
                                     return `r = ${r.toFixed(3)} (${getRText(r)})`;
                                 }
@@ -1004,11 +1049,23 @@
             showPage('detail');
             
             if (currentView === 'examiner') {
-                backButtonEl.onclick = () => loadExaminerTrendPage(examinerName);
+                // (V13)
+                backButtonEl.onclick = () => {
+                    // 重新渲染考官列表和總覽，以防篩選有變
+                    runAnalysisAndRender(); 
+                    // 切換回趨勢頁
+                    loadExaminerTrendPage(examinerName);
+                };
                 backButtonEl.textContent = `← 返回 ${examinerName} 的趨勢圖`;
             } else {
                 const sessionDate = sessionData.date;
-                backButtonEl.onclick = () => loadSessionSummaryPage(sessionDate);
+                 // (V13)
+                backButtonEl.onclick = () => {
+                    // 重新渲染場次列表和總覽，以防篩選有變
+                    runAnalysisAndRender();
+                    // 切換回場次頁
+                    loadSessionSummaryPage(sessionDate);
+                };
                 backButtonEl.textContent = `← 返回 ${formatISODate(sessionDate)} 的場次總覽`;
             }
             
