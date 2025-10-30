@@ -88,6 +88,8 @@
             <div class="p-6 overflow-y-auto flex-1">
                 <div id="examinerMasterListContainer">
                     <h2 class="text-2xl font-bold text-gray-800 mb-4">考官列表 (依 $r$ 排序)</h2>
+                    <!-- (V16) 新增考官搜尋框 -->
+                    <input type="text" id="examinerSearchInput" placeholder="搜尋考官姓名..." class="w-full px-3 py-2 mb-4 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 placeholder:text-gray-400">
                     <div id="examinerMasterList" class="space-y-2"></div>
                 </div>
                 <div id="sessionMasterListContainer" class="hidden">
@@ -290,12 +292,13 @@
         // --- (V12) Google Apps Script 網址 ---
         const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwaheMEsYWceyuaPRGHmvrA93EDjNEDYkFjUIAPDo9An-44uf9i2teVl8JaRJICUJPTCA/exec";
 
-        // --- (V13) 全局變數 (擴增) ---
+        // --- (V16) 全局變數 (擴增) ---
         let allExaminerData = {}; 
         let allSessionSummaryData = {};
         let allYears = [];
         let allDepartments = [];
         let allStudentTitles = [];
+        let lastSortedExaminerData = []; // (V16) 儲存排序後的考官數據
         let currentView = 'examiner';
         let currentYear = 'all';
         let currentDept = 'all';
@@ -308,9 +311,10 @@
         const COLORS = { BRIGHT_GREEN: '#10B981', GREEN: '#28a745', YELLOW: '#ffc107', ORANGE: '#F59E0B', RED: '#dc3545', GRAY: '#6c757d' };
         const STATUS_CLASSES = { BRIGHT_GREEN: 'status-bright-green', GREEN: 'status-green', YELLOW: 'status-yellow', ORANGE: 'status-orange', RED: 'status-red', GRAY: 'status-gray' };
 
-        // --- (V13) DOM 元素 (擴增) ---
+        // --- (V16) DOM 元素 (擴增) ---
         const examinerMasterListContainerEl = document.getElementById('examinerMasterListContainer');
         const examinerMasterListEl = document.getElementById('examinerMasterList');
+        const examinerSearchInputEl = document.getElementById('examinerSearchInput'); // (V16) 新增
         const sessionMasterListContainerEl = document.getElementById('sessionMasterListContainer');
         const sessionMasterListEl = document.getElementById('sessionMasterList');
         const loadingMessageEl = document.getElementById('loadingMessage');
@@ -489,9 +493,10 @@
             renderOverallAverage(allSessionRs);
 
             const sortedExaminerData = calculateAndSortExaminers(filteredExaminerData);
+            lastSortedExaminerData = sortedExaminerData; // (V16) 儲存排序後的數據
 
             if (currentView === 'examiner') {
-                renderExaminerList(sortedExaminerData);
+                renderExaminerList(sortedExaminerData); // (V16) renderExaminerList 內部會處理搜尋過濾
                 examinerMasterListContainerEl.classList.remove('hidden');
                 sessionMasterListContainerEl.classList.add('hidden');
             } else {
@@ -728,15 +733,26 @@
             return dataArray;
         }
 
+        /**
+         * (V16) 渲染考官列表 (新增搜尋過濾)
+         */
         function renderExaminerList(sortedData) {
             examinerMasterListEl.innerHTML = '';
             
-            if (sortedData.length === 0) {
-                examinerMasterListEl.innerHTML = `<div class="text-center text-gray-500 py-10">無符合條件的數據。</div>`;
+            // (V16) 獲取搜尋關鍵字
+            const searchTerm = examinerSearchInputEl.value.toLowerCase();
+            
+            // (V16) 過濾數據
+            const filteredData = sortedData.filter(examiner => 
+                examiner.name.toLowerCase().includes(searchTerm)
+            );
+
+            if (filteredData.length === 0) {
+                examinerMasterListEl.innerHTML = `<div class="text-center text-gray-500 py-10">無符合條件的考官。</div>`;
                 return;
             }
 
-            sortedData.forEach(examiner => {
+            filteredData.forEach(examiner => {
                 const button = document.createElement('button');
                 button.className = `w-full text-left p-4 rounded-lg border border-gray-200 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors duration-150`;
                 button.dataset.key = examiner.name;
@@ -1345,6 +1361,12 @@
                 loadingMessageEl.classList.add('hidden');
                 
                 renderFilters();
+
+                // (V16) 新增搜尋框事件監聽
+                examinerSearchInputEl.addEventListener('input', () => {
+                    // 只重新渲染考官列表，使用已儲存的排序數據
+                    renderExaminerList(lastSortedExaminerData);
+                });
                 
                 viewToggleExaminerEl.addEventListener('click', () => {
                     currentView = 'examiner';
