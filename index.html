@@ -1133,7 +1133,8 @@
             
             renderSessionScatterPlot(filteredScores, r, passingScore);
             
-            renderFeedback(examinerData, sessionData.key, r, sigmaX, sigmaY);
+            // (V17) 傳入 examinerData (用於 avgR 比較) -> 移除
+            renderFeedback(r, sigmaX, sigmaY);
         }
 
         
@@ -1192,6 +1193,8 @@
         
         function renderSessionScatterPlot(scores, r, passingScore) {
             const ctx = document.getElementById('correlationChart').getContext('2d');
+            // *** FIX HERE ***
+            // Was: const dataPoints = scores.map(s => ({ x: s.global, y s.total }));
             const dataPoints = scores.map(s => ({ x: s.global, y: s.total }));
             const rText = isNaN(r) ? 'N/A (數據無效)' : r.toFixed(3);
             
@@ -1264,23 +1267,17 @@
             });
         }
 
-        function renderFeedback(examinerData, sessionKey, r, sigmaX, sigmaY) {
+        /**
+         * (V17) 修正：移除所有長期分析，只專注於當前場次的 r, sigmaX, sigmaY
+         */
+        function renderFeedback(r, sigmaX, sigmaY) {
             const feedbackEl = document.getElementById('feedbackContent');
             feedbackEl.innerHTML = '';
             let problems = [], positives = [], suggestions = [];
             
             const bold = (text) => `<span class="font-bold">${text}</span>`;
 
-            const allSessions = Object.values(examinerData.sessions);
-            const allRs = allSessions.map(s => {
-                const x = s.scores.map(sc => sc.global);
-                const y = s.scores.map(sc => sc.total);
-                return pearsonCorrelation(x, y);
-            }).filter(val => !isNaN(val));
-            
-            const avgR = mean(allRs);
-            const stdDevOfR = stdDev(allRs);
-
+            // --- r (效度) 分析 ---
             if (isNaN(r) || sigmaX === 0) {
                 problems.push(`${bold('Global Rating 數據無效 (本場次)：')} 考官給予所有考生的「整體表現」分數均相同 ($\sigma_X = ${sigmaX.toFixed(2)}$)。這導致 $r$ 值無法計算，其數據${bold('無法')}用於標準設定。`);
                 suggestions.push(`${bold('(最優先) 請使用 Global Rating 量尺：')} 考官的職責包含使用「整體表現」(X) 來標定考生的水平 (例如：不及格、及格邊緣、通過)。請務必將您在 Checklist (Y) 上觀察到的差異，同步反映在「整體表現」(X) 的評分上。`);
@@ -1289,37 +1286,31 @@
                 suggestions.push(`${bold('校準評分標準：')} 請重新檢視「整體表現」的評分標準。高總分 (Y) 的考生應獲得高整體表現 (X) 評分，反之亦然。`);
             } else if (r < 0.7) {
                 problems.push(`${bold(`Global Rating 效度中等 (r = ${r.toFixed(3)})：`)} 考官的判斷與評分大致一致，但未達 0.7 的可信標準。`);
-                if (allRs.length > 1 && !isNaN(avgR) && r < avgR) {
-                     problems.push(`${bold('本次表現低於個人平均：')} 您本次的 $r = ${r.toFixed(3)}$，低於您個人的長期平均效度 (avgR = ${avgR.toFixed(3)})。`);
-                }
                 suggestions.push(`${bold('提升一致性：')} 請在評分時確保「整體表現」能更精確地對應到「總分」的表現。`);
             } else {
+                // (V17) 只有在 r >= 0.7 (有效且良好) 時才給予肯定
                 positives.push(`${bold(`Global Rating 效度高 (r = ${r.toFixed(3)})：`)} 考官的「整體判斷」(X) 與「客觀評分」(Y) 高度相關，數據可信賴，可有效用於標準設定。`);
             }
             
+            // --- Sigma (鑑別度) 分析 ---
             if (sigmaX > 0.5 && sigmaY > 1.0) {
+                // (V17) 只有在鑑別度良好時才給予肯定
                 positives.push(`${bold(`評分鑑別度良好 (σX=${sigmaX.toFixed(2)}, σY=${sigmaY.toFixed(2)})：`)} 考官能有效運用 Checklist (Y) 及 Global Rating (X) 量尺，區分出不同表現水平的考生。`);
             } else if (sigmaX === 0 && sigmaY > 1.0) {
                 problems.push(`${bold('標準設定功能失效：')} 考官有能力在 Checklist (Y) 上區分學生 ($\sigma_Y = ${sigmaY.toFixed(2)}$)，但${bold('未能')}將此判斷反映在 Global Rating (X) 上 ($\sigma_X = ${sigmaX.toFixed(2)}$)。`);
             } else if (sigmaX < 0.5 || sigmaY < 1.0) {
-                problems.push(`${bold('鑑別度可能偏低 (趨中誤差)：')} 考官給予的分數 (σY=${sigmaY.toFixed(2)}, σX=${sigmaX.toFixed(2)}) 相對集中，可能未能有效拉開高分群與低分群的差距。`);
-                suggestions.push(`${bold('關於『鑑別度偏低』：')} 這是一個${bold('相對指標')}。請比較${bold('其他考官在同一站的 $\sigma_Y$ 值')}。
-                    <br> - 如果${bold('您的 $\sigma_Y$ 明顯低於同事')}，請嘗試放大評分量尺 (勇於給分)。
-                    <br> - 但如果${bold('所有考官的 $\sigma_Y$ 都很低')}，則可能代表此梯次考生程度確實相近。`);
-            }
-
-            if (allRs.length > 2) { 
-                if (avgR >= 0.7 && stdDevOfR < 0.15) {
-                    positives.push(`${bold('長期評分穩定性高 (讚！)：')} 您在 ${allRs.length} 場評核中的平均效度 $r$ 值為 ${avgR.toFixed(3)}，且場次間的變異數極低 ($\sigma_r = ${stdDevOfR.toFixed(2)}$)，顯示您的評分標準非常穩定一致。`);
-                } else if (avgR < 0.7 && stdDevOfR > 0.2) {
-                    problems.push(`${bold('長期評分效度不穩：')} 您在 ${allRs.length} 場評核中的平均效度 $r$ 值偏低 (avgR = ${avgR.toFixed(3)})，且場次間變動大 ($\sigma_r = ${stdDevOfR.toFixed(2)}$)，顯示您的評分邏輯可能在不同場次間不一致。`);
-                    suggestions.push(`${bold('建立一致的評分SOP：')} 請在每次評核前，花一分鐘重新校準您對 Global Rating (X) 和 Checklist (Y) 之間關聯性的判斷標準。`);
-                } else if (!isNaN(r) && r < (avgR - stdDevOfR) && avgR > 0.7) {
-                     problems.push(`${bold('本次評核效度異常：')} 您本次的效度 $r = ${r.toFixed(3)}$，顯著低於您的個人平均水平 (avgR = ${avgR.toFixed(3)} $\pm$ ${stdDevOfR.toFixed(2)})。`);
-                     suggestions.push(`${bold('情境回顧：')} 請回想本次評核是否有特殊情況（例如：考站流程不順、對標準有疑慮），或重新檢視本站的 Global Rating 標準。`);
+                // (V17) 如果 sigmaX=0，這個 message 不應該和上面的「標準設定功能失效」同時出現
+                if (sigmaX > 0) { 
+                    problems.push(`${bold('鑑別度可能偏低 (趨中誤差)：')} 考官給予的分數 (σY=${sigmaY.toFixed(2)}, σX=${sigmaX.toFixed(2)}) 相對集中，可能未能有效拉開高分群與低分群的差距。`);
+                    suggestions.push(`${bold('關於『鑑別度偏低』：')} 這是一個${bold('相對指標')}。請比較${bold('其他考官在同一站的 $\sigma_Y$ 值')}。
+                        <br> - 如果${bold('您的 $\sigma_Y$ 明顯低於同事')}，請嘗試放大評分量尺 (勇於給分)。
+                        <br> - 但如果${bold('所有考官的 $\sigma_Y$ 都很低')}，則可能代表此梯次考生程度確實相近。`);
                 }
             }
 
+            // --- (V17) 移除所有 "allRs.length" 相關的長期分析區塊 ---
+            
+            // --- 渲染 ---
             if (positives.length > 0) {
                 const el = document.createElement('div');
                 el.className = 'p-4 border-l-4 border-green-500 bg-green-50 rounded';
@@ -1336,6 +1327,14 @@
                 const el = document.createElement('div');
                 el.className = 'p-4 border-l-4 border-blue-500 bg-blue-50 rounded';
                 el.innerHTML = `<h4 class="font-bold text-blue-800 mb-2">改善建議 (Suggestions)</h4><ul class="list-disc pl-5 space-y-1 text-blue-700">${suggestions.map(s => `<li>${s}</li>`).join('')}</ul>`;
+                feedbackEl.appendChild(el);
+            }
+
+            // (V17) 如果完全沒有回饋 (例如 r=0.75, 但 sigma 很低)
+            if (positives.length === 0 && problems.length === 0 && suggestions.length === 0) {
+                 const el = document.createElement('div');
+                el.className = 'p-4 border-l-4 border-gray-500 bg-gray-50 rounded';
+                el.innerHTML = `<h4 class="font-bold text-gray-800 mb-2">總結</h4><p class="text-gray-700">本次評核數據無明顯異常，但亦未達高度相關或鑑別度良好標準。</p>`;
                 feedbackEl.appendChild(el);
             }
         }
@@ -1362,7 +1361,7 @@
                 
                 renderFilters();
 
-                // (V16) 新增搜尋框事件監聽
+                // (V1List) 新增搜尋框事件監聽
                 examinerSearchInputEl.addEventListener('input', () => {
                     // 只重新渲染考官列表，使用已儲存的排序數據
                     renderExaminerList(lastSortedExaminerData);
