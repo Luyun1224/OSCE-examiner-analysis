@@ -48,8 +48,17 @@
     <header class="bg-white shadow-md z-10">
         <div class="mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between items-center h-16">
-                <h1 class="text-2xl font-bold text-blue-800">奇美醫院OSCE考官評分趨勢分析儀表板</h1>
+                <!-- (V18) 左側：標題 + 首頁按鈕 -->
+                <div class="flex items-center">
+                    <h1 class="text-2xl font-bold text-blue-800">奇美醫院OSCE考官評分趨勢分析儀表板</h1>
+                    <button id="homeButton" title="返回總覽儀表板" class="ml-4 p-2 rounded-full text-gray-600 hover:bg-gray-100 hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                        </svg>
+                    </button>
+                </div>
                 
+                <!-- (V18) 右側：篩選器 -->
                 <div class="flex items-center space-x-3">
                     <div class="filter-group">
                         <label for="deptFilter" class="text-sm font-medium text-gray-700">科別:</label>
@@ -330,6 +339,7 @@
         const studentTitleCountEl = document.getElementById('studentTitleCount');
         const viewToggleExaminerEl = document.getElementById('viewToggleExaminer');
         const viewToggleSessionEl = document.getElementById('viewToggleSession');
+        const homeButtonEl = document.getElementById('homeButton'); // (V18) 新增
 
         // --- 輔助函數 (數學) ---
         const mean = (arr) => arr.length === 0 ? 0 : arr.reduce((acc, val) => acc + val, 0) / arr.length;
@@ -1367,6 +1377,21 @@
                     renderExaminerList(lastSortedExaminerData);
                 });
                 
+                // (V18) 新增：首頁按鈕事件監聽
+                homeButtonEl.addEventListener('click', () => {
+                    // (V19) 修正：點擊首頁時，重置篩選器
+                    deptFilterEl.value = 'all';
+                    yearFilterEl.value = 'all';
+                    
+                    // runAnalysisAndRender() 函數會自動讀取重置後的值，並顯示總覽儀表板
+                    runAnalysisAndRender();
+                    
+                    // (V18) 重置列表的選取狀態
+                    document.querySelectorAll('#examinerMasterList button, #sessionMasterList button').forEach(btn => {
+                        btn.classList.remove('ring-2', 'ring-blue-500', 'ring-opacity-50', 'bg-blue-50');
+                    });
+                });
+                
                 viewToggleExaminerEl.addEventListener('click', () => {
                     currentView = 'examiner';
                     viewToggleExaminerEl.classList.add('active');
@@ -1414,4 +1439,5 @@
     </script>
 </body>
 </html>
+
 
