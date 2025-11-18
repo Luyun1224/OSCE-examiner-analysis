@@ -376,7 +376,7 @@ function renderRDistributionChart(distData) {
     const data = {
         labels: ['極高度 (0.9+)', '高度 (0.7-0.9)', '中度 (0.5-0.7)', '低度 (0.3-0.5)', '缺乏 (<0.3)', '無效'],
         datasets: [{
-            label: '場次數量',
+            label: '動用人次',
             data: [
                 distData['bright-green'],
                 distData['green'],
@@ -408,7 +408,7 @@ function renderRDistributionChart(distData) {
             scales: {
                 x: {
                     beginAtZero: true,
-                    title: { display: true, text: '場次數量' },
+                    title: { display: true, text: '動用人次' },
                     ticks: {
                         // (V14) 確保 X 軸為整數
                         stepSize: 1, 
@@ -423,7 +423,7 @@ function renderRDistributionChart(distData) {
                 legend: { display: false },
                 tooltip: {
                     callbacks: {
-                        label: (context) => ` ${context.raw} 場次`
+                        label: (context) => ` ${context.raw} 人次`
                     }
                 }
             }
