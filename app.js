@@ -427,8 +427,7 @@ function renderRDistributionChart(distData) {
                     }
                 }
             }
-        }
-    });
+        });
 }
 
 
@@ -583,8 +582,137 @@ function loadSessionSummaryPage(date) {
     showPage('summary');
 
     document.getElementById('summary_date').textContent = `${formatISODate(date)} 評核概況`;
+    
+    // 計算該場次考官效度統計
+    const examinerStats = [];
+    let totalExaminers = 0;
+    let validExaminers = 0;
+    let highValidityExaminers = 0;
+    let needAttentionExaminers = [];
+    
+    Object.values(data.stations).forEach(station => {
+        Object.values(station.examiners).forEach(examiner => {
+            const xData = examiner.scores.map(s => s.global);
+            const yData = examiner.scores.map(s => s.total);
+            const r = pearsonCorrelation(xData, yData);
+            
+            totalExaminers++;
+            examinerStats.push({
+                name: examiner.name,
+                department: examiner.department,
+                station: station.station,
+                r: r
+            });
+            
+            if (!isNaN(r)) {
+                validExaminers++;
+                if (r >= 0.7) {
+                    highValidityExaminers++;
+                } else {
+                    needAttentionExaminers.push({
+                        name: examiner.name,
+                        department: examiner.department,
+                        station: station.station,
+                        r: r
+                    });
+                }
+            } else {
+                needAttentionExaminers.push({
+                    name: examiner.name,
+                    department: examiner.department,
+                    station: station.station,
+                    r: r
+                });
+            }
+        });
+    });
+    
+    // 新增統計摘要區塊
     const stationsContainer = document.getElementById('sessionSummaryStations');
     stationsContainer.innerHTML = '';
+    
+    // 建立統計摘要卡片
+    const summaryEl = document.createElement('div');
+    summaryEl.className = 'bg-gradient-to-r from-blue-50 to-indigo-50 p-6 rounded-lg shadow-sm border border-blue-200 mb-6';
+    
+    const validityRate = validExaminers > 0 ? (highValidityExaminers / validExaminers * 100).toFixed(1) : 0;
+    
+    let summaryHtml = `
+        <div class="flex items-center mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-blue-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+            </svg>
+            <h3 class="text-lg font-bold text-blue-800">該場次考官評核效度統計</h3>
+        </div>
+        
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div class="bg-white p-4 rounded-lg shadow-sm">
+                <div class="text-2xl font-bold text-blue-600">${totalExaminers}</div>
+                <div class="text-sm text-gray-600">總考官人次</div>
+            </div>
+            <div class="bg-white p-4 rounded-lg shadow-sm">
+                <div class="text-2xl font-bold text-green-600">${highValidityExaminers}</div>
+                <div class="text-sm text-gray-600">高效度 (r≥0.7) 人次</div>
+            </div>
+            <div class="bg-white p-4 rounded-lg shadow-sm">
+                <div class="text-2xl font-bold ${validityRate >= 70 ? 'text-green-600' : validityRate >= 50 ? 'text-yellow-600' : 'text-red-600'}">${validityRate}%</div>
+                <div class="text-sm text-gray-600">高效度比例</div>
+            </div>
+        </div>
+    `;
+    
+    // 需關注考官列表
+    if (needAttentionExaminers.length > 0) {
+        summaryHtml += `
+            <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <h4 class="font-bold text-yellow-800 mb-2 flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    需關注考官 (r&lt;0.7 或數據無效)
+                </h4>
+                <div class="space-y-2">
+        `;
+        
+        needAttentionExaminers.forEach(examiner => {
+            const rText = isNaN(examiner.r) ? 'N/A' : examiner.r.toFixed(3);
+            const rColor = getRColor(examiner.r, 'hex');
+            const statusText = isNaN(examiner.r) ? '數據無效' : getRText(examiner.r);
+            
+            summaryHtml += `
+                <div class="flex justify-between items-center py-2 px-3 bg-white rounded border-l-4" style="border-left-color: ${rColor}">
+                    <div>
+                        <span class="font-medium text-gray-800">${examiner.name}</span>
+                        <span class="ml-2 text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">${examiner.department}</span>
+                        <span class="ml-2 text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded">${examiner.station}</span>
+                    </div>
+                    <div class="text-right">
+                        <div class="font-bold" style="color: ${rColor}">r = ${rText}</div>
+                        <div class="text-xs text-gray-500">${statusText}</div>
+                    </div>
+                </div>
+            `;
+        });
+        
+        summaryHtml += `
+                </div>
+            </div>
+        `;
+    } else {
+        summaryHtml += `
+            <div class="bg-green-50 border border-green-200 rounded-lg p-4">
+                <div class="flex items-center text-green-800">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span class="font-medium">優秀表現！所有考官效度均達標準 (r≥0.7)</span>
+                </div>
+            </div>
+        `;
+    }
+    
+    summaryEl.innerHTML = summaryHtml;
+    stationsContainer.appendChild(summaryEl);
 
     const stations = Object.values(data.stations).sort((a,b) => a.station.localeCompare(b.station));
 
