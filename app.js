@@ -154,6 +154,10 @@ function formatNumber(value, digits = 2) {
     return Number.isFinite(value) ? value.toFixed(digits) : 'N/A';
 }
 
+function formatExaminerNames(names = []) {
+    return names.length ? names.join('、') : 'N/A';
+}
+
 function calculatePassRate(scores = [], passingScore) {
     if (!scores.length || !Number.isFinite(Number(passingScore))) return NaN;
     const passCount = scores.filter(score => Number(score.total) >= Number(passingScore)).length;
@@ -450,9 +454,9 @@ function summarizeLessonOccurrence(occurrence) {
     const globalRatings = allScores.map(score => Number(score.global)).filter(Number.isFinite);
     const examinerStats = examiners.map(examiner => calculateSessionR(examiner.scores || []));
     const validRs = examinerStats.map(stat => stat.r).filter(Number.isFinite);
-    const passRates = examiners
-        .map(examiner => calculatePassRate(examiner.scores || [], examiner.passingScore))
-        .filter(Number.isFinite);
+    const examinerNames = examiners
+        .map(examiner => examiner.name || 'N/A')
+        .sort((a, b) => String(a).localeCompare(String(b), 'zh-Hant'));
 
     return {
         date: occurrence.date,
@@ -465,7 +469,7 @@ function summarizeLessonOccurrence(occurrence) {
         avgGlobal: mean(globalRatings),
         sdChecklist: stdDev(checklistScores),
         sdGlobal: stdDev(globalRatings),
-        avgPassRate: mean(passRates)
+        examinerNames
     };
 }
 
@@ -478,7 +482,8 @@ function summarizeLessonByYear(occurrenceSummaries) {
 
     return Array.from(byYear.entries()).map(([year, summaries]) => {
         const validRs = summaries.map(summary => summary.avgR).filter(Number.isFinite);
-        const passRates = summaries.map(summary => summary.avgPassRate).filter(Number.isFinite);
+        const examinerNames = [...new Set(summaries.flatMap(summary => summary.examinerNames || []))]
+            .sort((a, b) => String(a).localeCompare(String(b), 'zh-Hant'));
         return {
             year,
             occurrenceCount: summaries.length,
@@ -489,7 +494,7 @@ function summarizeLessonByYear(occurrenceSummaries) {
             avgGlobal: mean(summaries.map(summary => summary.avgGlobal).filter(Number.isFinite)),
             avgSdChecklist: mean(summaries.map(summary => summary.sdChecklist).filter(Number.isFinite)),
             avgSdGlobal: mean(summaries.map(summary => summary.sdGlobal).filter(Number.isFinite)),
-            avgPassRate: mean(passRates)
+            examinerNames
         };
     }).sort((a, b) => a.year.localeCompare(b.year));
 }
@@ -512,7 +517,7 @@ function renderCrossYearLessonComparison(sessionData, sameLessonStation) {
             <td class="px-3 py-2">${formatNumber(row.avgGlobal)}</td>
             <td class="px-3 py-2">${formatNumber(row.avgSdChecklist)}</td>
             <td class="px-3 py-2">${formatNumber(row.avgSdGlobal)}</td>
-            <td class="px-3 py-2">${Number.isFinite(row.avgPassRate) ? `${(row.avgPassRate * 100).toFixed(1)}%` : 'N/A'}</td>
+            <td class="px-3 py-2">${formatExaminerNames(row.examinerNames)}</td>
         </tr>
     `).join('') : `<tr><td colspan="10" class="px-3 py-6 text-center text-gray-500">找不到跨年度資料。</td></tr>`;
 
@@ -524,7 +529,7 @@ function renderCrossYearLessonComparison(sessionData, sameLessonStation) {
             <td class="px-3 py-2"><span class="status-dot ${getRColor(row.avgR, 'class')}"></span>${formatNumber(row.avgR, 3)}</td>
             <td class="px-3 py-2">${formatNumber(row.avgChecklist)}</td>
             <td class="px-3 py-2">${formatNumber(row.sdChecklist)}</td>
-            <td class="px-3 py-2">${Number.isFinite(row.avgPassRate) ? `${(row.avgPassRate * 100).toFixed(1)}%` : 'N/A'}</td>
+            <td class="px-3 py-2">${formatExaminerNames(row.examinerNames)}</td>
         </tr>
     `).join('');
 
@@ -541,7 +546,7 @@ function renderCrossYearLessonComparison(sessionData, sameLessonStation) {
             </div>
             <div class="overflow-x-auto mb-4">
                 <table class="min-w-full text-sm text-gray-700">
-                    <thead class="bg-gray-50 text-gray-600"><tr><th class="px-3 py-2 text-left">年度</th><th class="px-3 py-2 text-left">考過次數</th><th class="px-3 py-2 text-left">考官動用</th><th class="px-3 py-2 text-left">評分人次</th><th class="px-3 py-2 text-left">平均 r</th><th class="px-3 py-2 text-left">平均 Checklist</th><th class="px-3 py-2 text-left">平均 Global</th><th class="px-3 py-2 text-left">平均 Checklist SD</th><th class="px-3 py-2 text-left">平均 Global SD</th><th class="px-3 py-2 text-left">平均通過率</th></tr></thead>
+                    <thead class="bg-gray-50 text-gray-600"><tr><th class="px-3 py-2 text-left">年度</th><th class="px-3 py-2 text-left">考過次數</th><th class="px-3 py-2 text-left">考官動用</th><th class="px-3 py-2 text-left">評分人次</th><th class="px-3 py-2 text-left">平均 r</th><th class="px-3 py-2 text-left">平均 Checklist</th><th class="px-3 py-2 text-left">平均 Global</th><th class="px-3 py-2 text-left">平均 Checklist SD</th><th class="px-3 py-2 text-left">平均 Global SD</th><th class="px-3 py-2 text-left">當梯次的評分醫師</th></tr></thead>
                     <tbody>${yearRows}</tbody>
                 </table>
             </div>
@@ -549,7 +554,7 @@ function renderCrossYearLessonComparison(sessionData, sameLessonStation) {
                 <summary class="cursor-pointer font-semibold text-gray-700">展開每次施測明細</summary>
                 <div class="overflow-x-auto mt-3">
                     <table class="min-w-full text-sm text-gray-700">
-                        <thead class="bg-white text-gray-600"><tr><th class="px-3 py-2 text-left">日期</th><th class="px-3 py-2 text-left">考官數</th><th class="px-3 py-2 text-left">評分人次</th><th class="px-3 py-2 text-left">平均 r</th><th class="px-3 py-2 text-left">平均 Checklist</th><th class="px-3 py-2 text-left">Checklist SD</th><th class="px-3 py-2 text-left">平均通過率</th></tr></thead>
+                        <thead class="bg-white text-gray-600"><tr><th class="px-3 py-2 text-left">日期</th><th class="px-3 py-2 text-left">考官數</th><th class="px-3 py-2 text-left">評分人次</th><th class="px-3 py-2 text-left">平均 r</th><th class="px-3 py-2 text-left">平均 Checklist</th><th class="px-3 py-2 text-left">Checklist SD</th><th class="px-3 py-2 text-left">當梯次的評分醫師</th></tr></thead>
                         <tbody>${occurrenceRows}</tbody>
                     </table>
                 </div>
