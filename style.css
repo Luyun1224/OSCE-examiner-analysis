@@ -31,3 +31,10 @@ body {
 .filter-group label {
     flex-shrink: 0;
 }
+.station-comparison-table th,
+.station-comparison-table td {
+    vertical-align: middle;
+}
+.station-comparison-table .status-dot {
+    margin-right: 0.35rem;
+}

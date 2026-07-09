@@ -12,6 +12,9 @@ let currentView = 'examiner';
 let currentYear = 'all';
 let currentDept = 'all';
 let currentSessionScores = []; 
+let stationComparisonSort = { key: 'r', direction: 'asc' };
+let stationComparisonLightFilter = 'all';
+
 
 let trendChartInstance = null; 
 let sessionChartInstance = null;
@@ -119,6 +122,154 @@ function formatISODate(isoDate) {
     } catch (e) { return isoDate; }
 }
 
+
+
+function getRLight(r, n) {
+    const validity = getSampleValidity(n);
+    if (!validity.canCalculate || !Number.isFinite(r)) return 'gray';
+    if (r >= 0.7) return 'green';
+    if (r >= 0.5) return 'yellow';
+    return 'red';
+}
+
+function getRLightLabel(light) {
+    return ({ green: '綠燈', yellow: '黃燈', red: '紅燈', gray: '資料不足' })[light] || '全部';
+}
+
+function getRLightClass(light) {
+    return ({
+        green: 'bg-green-100 text-green-800 border-green-200',
+        yellow: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+        red: 'bg-red-100 text-red-800 border-red-200',
+        gray: 'bg-gray-100 text-gray-700 border-gray-200'
+    })[light] || 'bg-gray-100 text-gray-700 border-gray-200';
+}
+
+function formatNumber(value, digits = 2) {
+    return Number.isFinite(value) ? value.toFixed(digits) : 'N/A';
+}
+
+function calculatePassRate(scores = [], passingScore) {
+    if (!scores.length || !Number.isFinite(Number(passingScore))) return NaN;
+    const passCount = scores.filter(score => Number(score.total) >= Number(passingScore)).length;
+    return passCount / scores.length;
+}
+
+function calculateStationExaminerComparisons(station) {
+    const examiners = Object.values(station.examiners || {});
+    const rows = examiners.map(examiner => {
+        const scores = examiner.scores || [];
+        const checklistScores = scores.map(score => Number(score.total)).filter(Number.isFinite);
+        const globalRatings = scores.map(score => Number(score.global)).filter(Number.isFinite);
+        const stat = calculateSessionR(scores);
+        return {
+            name: examiner.name,
+            department: examiner.department,
+            station: station.station,
+            n: scores.length,
+            r: stat.r,
+            light: getRLight(stat.r, scores.length),
+            avgChecklist: mean(checklistScores),
+            avgGlobal: mean(globalRatings),
+            sdChecklist: stdDev(checklistScores),
+            sdGlobal: stdDev(globalRatings),
+            passRate: calculatePassRate(scores, examiner.passingScore),
+            insufficient: scores.length < 8 || !Number.isFinite(stat.r)
+        };
+    });
+
+    const stationMeanChecklist = mean(rows.map(row => row.avgChecklist).filter(Number.isFinite));
+    const stationSdChecklist = stdDev(rows.map(row => row.avgChecklist).filter(Number.isFinite));
+    const fallbackThreshold = Math.abs(stationMeanChecklist) * 0.05;
+    // 嚴格/寬鬆門檻：優先使用同站「各考官平均 Checklist Score」標準差的 0.5 倍；
+    // 若同站差異太小或考官數不足，改用同站平均分數的 5%。未來可依院內共識調整 0.5 或 5%。
+    const strictnessThreshold = Math.max(stationSdChecklist * 0.5, fallbackThreshold, 0.01);
+
+    return rows.map(row => {
+        let strictness = '接近平均';
+        let strictnessClass = 'bg-gray-100 text-gray-700 border-gray-200';
+        const diff = row.avgChecklist - stationMeanChecklist;
+        if (Number.isFinite(diff) && diff < -strictnessThreshold) {
+            strictness = '偏嚴';
+            strictnessClass = 'bg-red-100 text-red-800 border-red-200';
+        } else if (Number.isFinite(diff) && diff > strictnessThreshold) {
+            strictness = '偏鬆';
+            strictnessClass = 'bg-blue-100 text-blue-800 border-blue-200';
+        }
+        return { ...row, stationMeanChecklist, strictnessThreshold, strictness, strictnessClass };
+    });
+}
+
+function renderStationComparisonTable(station) {
+    let rows = calculateStationExaminerComparisons(station);
+    if (stationComparisonLightFilter !== 'all') {
+        rows = rows.filter(row => row.light === stationComparisonLightFilter);
+    }
+
+    const sortableColumns = [
+        ['name', '考官姓名'], ['department', '科別'], ['station', '考站名稱'], ['n', '評核人數 n'],
+        ['r', 'r 值'], ['avgChecklist', '平均 Checklist Score'], ['avgGlobal', '平均 Global Rating'],
+        ['sdChecklist', 'Checklist SD'], ['sdGlobal', 'Global Rating SD'], ['passRate', '通過率'], ['strictness', '嚴格/寬鬆']
+    ];
+    const direction = stationComparisonSort.direction === 'asc' ? 1 : -1;
+    rows.sort((a, b) => {
+        const key = stationComparisonSort.key;
+        const aVal = a[key];
+        const bVal = b[key];
+        if (typeof aVal === 'number' || typeof bVal === 'number') {
+            const av = Number.isFinite(aVal) ? aVal : -Infinity;
+            const bv = Number.isFinite(bVal) ? bVal : -Infinity;
+            return (av - bv) * direction;
+        }
+        return String(aVal || '').localeCompare(String(bVal || ''), 'zh-Hant') * direction;
+    });
+
+    const filterButtons = ['all', 'green', 'yellow', 'red'].map(light => `
+        <button type="button" data-light-filter="${light}" class="station-light-filter px-3 py-1 rounded-full border text-sm ${stationComparisonLightFilter === light ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}">
+            ${light === 'all' ? '全部燈號' : getRLightLabel(light)}
+        </button>
+    `).join('');
+
+    const headers = sortableColumns.map(([key, label]) => {
+        const arrow = stationComparisonSort.key === key ? (stationComparisonSort.direction === 'asc' ? ' ▲' : ' ▼') : '';
+        return `<th scope="col" class="px-3 py-2 text-left whitespace-nowrap"><button type="button" data-sort-key="${key}" class="station-sort font-semibold hover:text-blue-700">${label}${arrow}</button></th>`;
+    }).join('');
+
+    const body = rows.length ? rows.map(row => `
+        <tr class="border-t border-gray-100 hover:bg-gray-50">
+            <td class="px-3 py-2 font-medium text-gray-900">${row.name}</td>
+            <td class="px-3 py-2">${row.department || 'N/A'}</td>
+            <td class="px-3 py-2">${row.station || 'N/A'}</td>
+            <td class="px-3 py-2">${row.n}</td>
+            <td class="px-3 py-2"><span class="status-dot ${getRColor(row.r, 'class')}"></span>${formatNumber(row.r, 3)}</td>
+            <td class="px-3 py-2">${formatNumber(row.avgChecklist)}</td>
+            <td class="px-3 py-2">${formatNumber(row.avgGlobal)}</td>
+            <td class="px-3 py-2">${formatNumber(row.sdChecklist)}</td>
+            <td class="px-3 py-2">${formatNumber(row.sdGlobal)}</td>
+            <td class="px-3 py-2">${Number.isFinite(row.passRate) ? `${(row.passRate * 100).toFixed(1)}%` : 'N/A'}</td>
+            <td class="px-3 py-2"><span class="inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${row.strictnessClass}">${row.strictness}</span></td>
+        </tr>
+        ${row.insufficient ? `<tr class="bg-orange-50 text-orange-800 text-xs"><td colspan="11" class="px-3 py-2">${row.name}：樣本不足，不建議解讀</td></tr>` : ''}
+    `).join('') : `<tr><td colspan="11" class="px-3 py-6 text-center text-gray-500">無符合燈號篩選的考官。</td></tr>`;
+
+    return `
+        <div class="mt-5 border-t border-gray-200 pt-4">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-3">
+                <div>
+                    <h4 class="text-lg font-bold text-gray-800">同站考官比較</h4>
+                    <p class="text-xs text-gray-500">嚴格/寬鬆以考官平均 Checklist Score 與同站平均比較；差距超過門檻才標示偏嚴或偏鬆。</p>
+                </div>
+                <div class="flex flex-wrap gap-2">${filterButtons}</div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-sm text-gray-700 station-comparison-table">
+                    <thead class="bg-gray-50 text-gray-600">${headers}</thead>
+                    <tbody>${body}</tbody>
+                </table>
+            </div>
+        </div>
+    `;
+}
 
 function getSampleValidity(n) {
     if (n < 3) return { canCalculate: false, label: '樣本不足', className: 'text-red-600' };
@@ -658,8 +809,27 @@ function loadSessionSummaryPage(date) {
         stationEl.innerHTML = `
             <h3 class="text-xl font-bold text-blue-800 mb-3">${station.station}</h3>
             <div class="flow-root">${examinerHtml}</div>
+            ${renderStationComparisonTable(station)}
         `;
         stationsContainer.appendChild(stationEl);
+
+        stationEl.querySelectorAll('.station-sort').forEach(button => {
+            button.addEventListener('click', () => {
+                const key = button.dataset.sortKey;
+                if (stationComparisonSort.key === key) {
+                    stationComparisonSort.direction = stationComparisonSort.direction === 'asc' ? 'desc' : 'asc';
+                } else {
+                    stationComparisonSort = { key, direction: ['name', 'department', 'station', 'strictness'].includes(key) ? 'asc' : 'desc' };
+                }
+                loadSessionSummaryPage(date);
+            });
+        });
+        stationEl.querySelectorAll('.station-light-filter').forEach(button => {
+            button.addEventListener('click', () => {
+                stationComparisonLightFilter = button.dataset.lightFilter;
+                loadSessionSummaryPage(date);
+            });
+        });
     });
 }
 
@@ -939,7 +1109,7 @@ function renderSessionDetailDynamicContent(sessionData, examinerData) {
     renderSessionScatterPlot(filteredScores, r, passingScore);
     
     // (V17) 傳入 examinerData (用於 avgR 比較) -> 移除
-    renderFeedback(r, sigmaX, sigmaY, filteredScores.length);
+    renderFeedback(r, sigmaX, sigmaY, filteredScores.length, examinerData);
 }
 
 
@@ -1075,78 +1245,92 @@ function renderSessionScatterPlot(scores, r, passingScore) {
 /**
  * (V17) 修正：移除所有長期分析，只專注於當前場次的 r, sigmaX, sigmaY
  */
-function renderFeedback(r, sigmaX, sigmaY, n) {
+function getFeedbackPrescriptionLevel(r, sigmaX, sigmaY, n, examinerData) {
+    const sessions = Object.values(examinerData?.sessions || {});
+    const abnormalCount = sessions.filter(session => {
+        const stat = calculateSessionR(session.scores || []);
+        const globals = (session.scores || []).map(score => Number(score.global)).filter(Number.isFinite);
+        const totals = (session.scores || []).map(score => Number(score.total)).filter(Number.isFinite);
+        const sx = stdDev(globals);
+        const sy = stdDev(totals);
+        return (Number.isFinite(stat.r) && stat.r < 0.5) || sx === 0 || (sy > 1.0 && sx === 0);
+    }).length;
+    const consecutiveAbnormal = abnormalCount >= 2;
+
+    if ((n >= 3 && Number.isFinite(r) && r < 0.5) || sigmaX === 0 || (sigmaY > 1.0 && sigmaX === 0) || consecutiveAbnormal) {
+        return { level: 'red', label: '紅燈', consecutiveAbnormal };
+    }
+    if ((n >= 3 && Number.isFinite(r) && r >= 0.7) && n >= 8 && sigmaX > 0.5 && sigmaY > 1.0) {
+        return { level: 'green', label: '綠燈', consecutiveAbnormal };
+    }
+    return { level: 'yellow', label: '黃燈', consecutiveAbnormal };
+}
+
+/**
+ * 第三階段：將即時回饋升級為「考官改善處方箋」。
+ * 分級邏輯刻意維持簡單透明：綠燈須同時達成 r、n、Global Rating/Checklist 變異；
+ * 黃燈涵蓋中等 r、樣本偏少或評分過度集中；紅燈涵蓋低 r、Global Rating 無變異或疑似連續異常。
+ */
+function renderFeedback(r, sigmaX, sigmaY, n, examinerData) {
     const feedbackEl = document.getElementById('feedbackContent');
     feedbackEl.innerHTML = '';
-    let problems = [], positives = [], suggestions = [];
-    
-    const bold = (text) => `<span class="font-bold">${text}</span>`;
+    const prescription = getFeedbackPrescriptionLevel(r, sigmaX, sigmaY, n, examinerData);
+    const rText = Number.isFinite(r) ? r.toFixed(3) : 'N/A';
+    const sampleText = n < 3 ? '樣本不足，不建議解讀' : (n < 8 ? '樣本數偏少，僅供參考' : '樣本數足夠');
 
-    // --- r (效度) 分析 ---
-    if (n < 3) {
-        problems.push(`${bold(`樣本不足 (n = ${n})：`)} 本場次少於 3 筆資料，依規則不計算 $r$，請勿解讀為效度極差。`);
-        suggestions.push(`${bold('補足樣本後再判讀：')} 建議累積至少 3 筆才計算 $r$；n < 8 時仍需標示「樣本數偏少，僅供參考」。`);
-    } else if (isNaN(r) || sigmaX === 0) {
-        problems.push(`${bold('Global Rating 數據無效 (本場次)：')} 考官給予所有考生的「整體表現」分數均相同 ($\sigma_X = ${sigmaX.toFixed(2)}$)。這導致 $r$ 值無法計算，其數據${bold('無法')}用於標準設定。`);
-        suggestions.push(`${bold('(最優先) 請使用 Global Rating 量尺：')} 考官的職責包含使用「整體表現」(X) 來標定考生的水平 (例如：不及格、及格邊緣、通過)。請務必將您在 Checklist (Y) 上觀察到的差異，同步反映在「整體表現」(X) 的評分上。`);
-    } else if (n < 8) {
-        suggestions.push(`${bold(`樣本數偏少 (n = ${n})：`)} 目前 $r = ${r.toFixed(3)}$ 可供初步參考，但不宜作為穩定結論。`);
-    } else if (r < 0.5) {
-        problems.push(`${bold(`Global Rating 效度低 (r = ${r.toFixed(3)})：`)} 考官的「整體表現」(X) 判斷與其「總分」(Y) 評分存在${bold('顯著不一致')}。這可能代表考官對 Global Rating 的定義理解有誤，或評分時有 logique 矛盾。`);
-        suggestions.push(`${bold('校準評分標準：')} 請重新檢視「整體表現」的評分標準。高總分 (Y) 的考生應獲得高整體表現 (X) 評分，反之亦然。`);
-    } else if (r < 0.7) {
-        problems.push(`${bold(`Global Rating 效度中等 (r = ${r.toFixed(3)})：`)} 考官的判斷與評分大致一致，但未達 0.7 的可信標準。`);
-        suggestions.push(`${bold('提升一致性：')} 請在評分時確保「整體表現」能更精確地對應到「總分」的表現。`);
-    } else {
-        // (V17) 只有在 r >= 0.7 (有效且良好) 時才給予肯定
-        positives.push(`${bold(`Global Rating 效度高 (r = ${r.toFixed(3)})：`)} 考官的「整體判斷」(X) 與「客觀評分」(Y) 高度相關，數據可信賴，可有效用於標準設定。`);
-    }
-    
-    // --- Sigma (鑑別度) 分析 ---
-    if (sigmaX > 0.5 && sigmaY > 1.0) {
-        // (V17) 只有在鑑別度良好時才給予肯定
-        positives.push(`${bold(`評分鑑別度良好 (σX=${sigmaX.toFixed(2)}, σY=${sigmaY.toFixed(2)})：`)} 考官能有效運用 Checklist (Y) 及 Global Rating (X) 量尺，區分出不同表現水平的考生。`);
-    } else if (sigmaX === 0 && sigmaY > 1.0) {
-        problems.push(`${bold('標準設定功能失效：')} 考官有能力在 Checklist (Y) 上區分學生 ($\sigma_Y = ${sigmaY.toFixed(2)}$)，但${bold('未能')}將此判斷反映在 Global Rating (X) 上 ($\sigma_X = ${sigmaX.toFixed(2)}$)。`);
-    } else if (sigmaX < 0.5 || sigmaY < 1.0) {
-        // (V17) 如果 sigmaX=0，這個 message 不應該和上面的「標準設定功能失效」同時出現
-        if (sigmaX > 0) { 
-            problems.push(`${bold('鑑別度可能偏低 (趨中誤差)：')} 考官給予的分數 (σY=${sigmaY.toFixed(2)}, σX=${sigmaX.toFixed(2)}) 相對集中，可能未能有效拉開高分群與低分群的差距。`);
-            suggestions.push(`${bold('關於『鑑別度偏低』：')} 這是一個${bold('相對指標')}。請比較${bold('其他考官在同一站的 $\sigma_Y$ 值')}。
-                <br> - 如果${bold('您的 $\sigma_Y$ 明顯低於同事')}，請嘗試放大評分量尺 (勇於給分)。
-                <br> - 但如果${bold('所有考官的 $\sigma_Y$ 都很低')}，則可能代表此梯次考生程度確實相近。`);
+    const config = {
+        green: {
+            card: 'border-green-500 bg-green-50', title: 'text-green-800', body: 'text-green-700', badge: 'bg-green-600',
+            heading: '綠燈：評分一致性良好',
+            criteria: [
+                `r = ${rText}（達 r ≥ 0.7）`,
+                `${sampleText}`,
+                `Global Rating SD = ${sigmaX.toFixed(2)}、Checklist Score SD = ${sigmaY.toFixed(2)}，兩者皆有適當變異`
+            ],
+            suggestions: ['評分一致性良好', '可作為穩定考官', '可持續參與 OSCE 評核']
+        },
+        yellow: {
+            card: 'border-yellow-500 bg-yellow-50', title: 'text-yellow-800', body: 'text-yellow-800', badge: 'bg-yellow-500',
+            heading: '黃燈：建議校準後持續追蹤',
+            criteria: [
+                `r = ${rText}（可能介於 0.5–0.7，或尚未達穩定綠燈條件）`,
+                `${sampleText}`,
+                `Global Rating SD = ${sigmaX.toFixed(2)}、Checklist Score SD = ${sigmaY.toFixed(2)}；若 SD 偏低代表評分使用可能過度集中`
+            ],
+            suggestions: ['建議下次評分前重新校準 Global Rating 錨點', '建議檢視是否有趨中評分傾向', '建議與同站考官進行評分標準討論']
+        },
+        red: {
+            card: 'border-red-500 bg-red-50', title: 'text-red-800', body: 'text-red-700', badge: 'bg-red-600',
+            heading: '紅燈：需優先介入回饋',
+            criteria: [
+                `r = ${rText}（若 r < 0.5 表示 Global Rating 與 Checklist Score 一致性不足）`,
+                `Global Rating SD = ${sigmaX.toFixed(2)}${sigmaX === 0 ? '（完全無變異）' : ''}`,
+                `Checklist Score SD = ${sigmaY.toFixed(2)}${sigmaY > 1.0 && sigmaX === 0 ? '；Checklist 有差異但 Global Rating 完全沒差異' : ''}`,
+                prescription.consecutiveAbnormal ? '偵測到多場次異常，建議視為連續異常追蹤' : '未偵測到多場次異常訊號'
+            ],
+            suggestions: ['建議納入考官回饋', '建議安排評分標準再校準', '建議於下次 OSCE 前進行案例練習', '若連續異常，建議列入考官培訓追蹤名單']
         }
-    }
+    }[prescription.level];
 
-    // --- (V17) 移除所有 "allRs.length" 相關的長期分析區塊 ---
-    
-    // --- 渲染 ---
-    if (positives.length > 0) {
-        const el = document.createElement('div');
-        el.className = 'p-4 border-l-4 border-green-500 bg-green-50 rounded';
-        el.innerHTML = `<h4 class="font-bold text-green-800 mb-2">肯定點 (Good Practice)</h4><ul class="list-disc pl-5 space-y-1 text-green-700">${positives.map(p => `<li>${p}</li>`).join('')}</ul>`;
-        feedbackEl.appendChild(el);
-    }
-    if (problems.length > 0) {
-        const el = document.createElement('div');
-        el.className = 'p-4 border-l-4 border-red-500 bg-red-50 rounded';
-        el.innerHTML = `<h4 class="font-bold text-red-800 mb-2">潛在問題點 (Issues)</h4><ul class="list-disc pl-5 space-y-1 text-red-700">${problems.map(p => `<li>${p}</li>`).join('')}</ul>`;
-        feedbackEl.appendChild(el);
-    }
-    if (suggestions.length > 0) {
-        const el = document.createElement('div');
-        el.className = 'p-4 border-l-4 border-blue-500 bg-blue-50 rounded';
-        el.innerHTML = `<h4 class="font-bold text-blue-800 mb-2">改善建議 (Suggestions)</h4><ul class="list-disc pl-5 space-y-1 text-blue-700">${suggestions.map(s => `<li>${s}</li>`).join('')}</ul>`;
-        feedbackEl.appendChild(el);
-    }
-
-    // (V17) 如果完全沒有回饋 (例如 r=0.75, 但 sigma 很低)
-    if (positives.length === 0 && problems.length === 0 && suggestions.length === 0) {
-         const el = document.createElement('div');
-        el.className = 'p-4 border-l-4 border-gray-500 bg-gray-50 rounded';
-        el.innerHTML = `<h4 class="font-bold text-gray-800 mb-2">總結</h4><p class="text-gray-700">本次評核數據無明顯異常，但亦未達高度相關或鑑別度良好標準。</p>`;
-        feedbackEl.appendChild(el);
-    }
+    feedbackEl.innerHTML = `
+        <div class="p-4 border-l-4 rounded ${config.card}">
+            <div class="flex items-start justify-between gap-3">
+                <h4 class="font-bold ${config.title} mb-2">${config.heading}</h4>
+                <span class="shrink-0 rounded-full px-3 py-1 text-xs font-bold text-white ${config.badge}">${prescription.label}</span>
+            </div>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 ${config.body}">
+                <div>
+                    <h5 class="font-semibold mb-1">判讀依據</h5>
+                    <ul class="list-disc pl-5 space-y-1">${config.criteria.map(item => `<li>${item}</li>`).join('')}</ul>
+                </div>
+                <div>
+                    <h5 class="font-semibold mb-1">改善處方箋</h5>
+                    <ul class="list-disc pl-5 space-y-1">${config.suggestions.map(item => `<li>${item}</li>`).join('')}</ul>
+                </div>
+            </div>
+            ${n < 8 ? '<p class="mt-3 text-sm font-medium text-orange-700">樣本不足，不建議解讀；建議累積更多評核資料後再做正式判斷。</p>' : ''}
+        </div>
+    `;
 }
 
 /**
