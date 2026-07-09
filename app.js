@@ -42,7 +42,7 @@ const viewToggleSessionEl = document.getElementById('viewToggleSession');
 const homeButtonEl = document.getElementById('homeButton'); // (V18) 新增
 
 // --- 輔助函數 (數學) ---
-const mean = (arr) => arr.length === 0 ? 0 : arr.reduce((acc, val) => acc + val, 0) / arr.length;
+const mean = (arr) => arr.length === 0 ? NaN : arr.reduce((acc, val) => acc + val, 0) / arr.length;
 const stdDev = (arr) => {
     if (arr.length < 2) return 0;
     const m = mean(arr);
@@ -50,7 +50,7 @@ const stdDev = (arr) => {
     return Math.sqrt(avgSqDiff);
 };
 const pearsonCorrelation = (x, y) => {
-    if (!x || !y || x.length !== y.length || x.length < 2) return 0;
+    if (!x || !y || x.length !== y.length || x.length < 3) return NaN;
     const n = x.length;
     const meanX = mean(x);
     const meanY = mean(y);
@@ -117,6 +117,37 @@ function formatISODate(isoDate) {
         
         return isoDate; // Fallback
     } catch (e) { return isoDate; }
+}
+
+
+function getSampleValidity(n) {
+    if (n < 3) return { canCalculate: false, label: '樣本不足', className: 'text-red-600' };
+    if (n < 8) return { canCalculate: true, label: '樣本數偏少，僅供參考', className: 'text-orange-600' };
+    return { canCalculate: true, label: '有效樣本數充足', className: 'text-gray-500' };
+}
+
+function calculateSessionR(scores = []) {
+    const n = scores.length;
+    const validity = getSampleValidity(n);
+    if (!validity.canCalculate) return { r: NaN, n, validity };
+    return {
+        r: pearsonCorrelation(scores.map(sc => sc.global), scores.map(sc => sc.total)),
+        n,
+        validity
+    };
+}
+
+function formatRWithN(r, n) {
+    const validity = getSampleValidity(n);
+    const rText = Number.isFinite(r) ? r.toFixed(3) : 'N/A';
+    return `r = ${rText}，n = ${n}${validity.label ? `，${validity.label}` : ''}`;
+}
+
+function getRValidityText(r, n) {
+    const validity = getSampleValidity(n);
+    if (!validity.canCalculate) return '樣本不足';
+    if (!Number.isFinite(r)) return '資料無效或樣本不足';
+    return validity.label;
 }
 
 function getRColor(r, type = 'hex') {
@@ -237,7 +268,7 @@ function runAnalysisAndRender() {
     
     const allSessionRs = Object.values(filteredExaminerData).flatMap(examiner => 
         Object.values(examiner.sessions).map(s => 
-            pearsonCorrelation(s.scores.map(sc => sc.global), s.scores.map(sc => sc.total))
+            calculateSessionR(s.scores).r
         )
     );
     
@@ -361,7 +392,7 @@ function createExaminerListItem(examiner) {
             <span class="font-medium text-gray-800">${examiner.name}</span>
             <span class="text-xs text-gray-500 ml-1">(${examiner.department})</span>
         </div>
-        <span class="font-bold" style="color: ${rColor}">${rText}</span>
+        <span class="font-bold" style="color: ${rColor}">${rText} <span class="text-xs text-gray-500">(n=${examiner.totalN})</span></span>
     `;
     return li;
 }
@@ -464,7 +495,7 @@ function renderOverallAverage(allSessionRs) {
     overallAverageREl.innerHTML = `
         <div class="text-sm font-medium text-gray-500 mr-2">全體平均效度:</div>
         <span class="text-2xl font-bold" style="color: ${colorHex}">${isNaN(overallAvg) ? 'N/A' : overallAvg.toFixed(3)}</span>
-        <span class="text-sm text-gray-500 ml-2">(${validRs.length} 筆有效場次)</span>
+        <span class="text-sm text-gray-500 ml-2">(n = ${validRs.length} 筆有效場次)</span>
     `;
     overallAverageREl.classList.remove('animate-pulse');
 }
@@ -472,12 +503,11 @@ function renderOverallAverage(allSessionRs) {
 function calculateAndSortExaminers(filteredExaminerData) {
     const dataArray = Object.values(filteredExaminerData).map(examiner => {
         const sessions = Object.values(examiner.sessions);
-        const validRs = sessions.map(s => {
-            return pearsonCorrelation(s.scores.map(sc => sc.global), s.scores.map(sc => sc.total));
-        }).filter(r => !isNaN(r));
-        
+        const sessionStats = sessions.map(s => calculateSessionR(s.scores));
+        const validRs = sessionStats.map(stat => stat.r).filter(r => Number.isFinite(r));
         const avgR = mean(validRs);
-        return { ...examiner, avgR: avgR, sessionCount: sessions.length };
+        const totalN = sessionStats.reduce((sum, stat) => sum + stat.n, 0);
+        return { ...examiner, avgR: avgR, sessionCount: sessions.length, validSessionCount: validRs.length, totalN };
     });
     
     dataArray.sort((a, b) => {
@@ -525,9 +555,9 @@ function renderExaminerList(sortedData) {
             <div class="flex items-center mt-2">
                 <span class="status-dot ${statusClass}"></span>
                 <span class="text-sm font-medium ${textClass}">
-                    平均 $r = ${isNaN(avgR) ? 'N/A' : avgR.toFixed(3)}
+                    平均 $r = ${isNaN(avgR) ? 'N/A' : avgR.toFixed(3)}，n = ${examiner.totalN}
                 </span>
-                <span class="ml-auto text-sm text-gray-500">${examiner.sessionCount} 場</span>
+                <span class="ml-auto text-sm text-gray-500">${examiner.sessionCount} 場 / ${examiner.validSessionCount} 有效</span>
             </div>
         `;
         button.addEventListener('click', () => {
@@ -556,11 +586,19 @@ function renderSessionSummaryList(sortedData) {
         button.dataset.key = session.date;
 
         const stationCount = Object.keys(session.stations).length;
+        const sessionStats = Object.values(session.stations).flatMap(station =>
+            Object.values(station.examiners).map(examiner => calculateSessionR(examiner.scores))
+        );
+        const validRs = sessionStats.map(stat => stat.r).filter(r => Number.isFinite(r));
+        const avgR = mean(validRs);
+        const totalN = sessionStats.reduce((sum, stat) => sum + stat.n, 0);
+        const rColor = getRColor(avgR, 'hex');
 
         button.innerHTML = `
             <div class="font-bold text-lg text-gray-800 truncate">${formatISODate(session.date)}</div>
             <div class="flex items-center mt-2">
                 <span class="text-sm text-gray-500">${stationCount} 個考站</span>
+                <span class="ml-auto text-sm font-medium" style="color: ${rColor}">平均 r = ${isNaN(avgR) ? 'N/A' : avgR.toFixed(3)}，n = ${totalN}</span>
             </div>
         `;
         button.addEventListener('click', () => {
@@ -596,9 +634,8 @@ function loadSessionSummaryPage(date) {
         const examiners = Object.values(station.examiners).sort((a,b) => a.name.localeCompare(b.name));
 
         examiners.forEach(examiner => {
-            const xData = examiner.scores.map(s => s.global);
-            const yData = examiner.scores.map(s => s.total);
-            const r = pearsonCorrelation(xData, yData);
+            const stat = calculateSessionR(examiner.scores);
+            const r = stat.r;
             const statusClass = getRColor(r, 'class');
             const textClass = statusClass.replace('status-', 'text-');
 
@@ -611,7 +648,7 @@ function loadSessionSummaryPage(date) {
                     <div class="flex items-center">
                         <span class="status-dot ${statusClass}"></span>
                         <span class="text-sm font-medium ${textClass}">
-                            r = ${isNaN(r) ? 'N/A' : r.toFixed(3)}
+                            ${formatRWithN(r, stat.n)}
                         </span>
                     </div>
                 </div>
@@ -644,14 +681,14 @@ function loadExaminerTrendPage(examinerName) {
         });
 
     const trendData = sessionsArray.map(session => {
-        const xData = session.scores.map(s => s.global);
-        const yData = session.scores.map(s => s.total);
-        const r = pearsonCorrelation(xData, yData);
+        const stat = calculateSessionR(session.scores);
+        const r = stat.r;
         return {
             date: session.date,
             station: session.station,
             key: session.key,
             r: r, // (V15) 傳遞原始 r (可能為 NaN)
+            n: stat.n,
         };
     });
     
@@ -690,7 +727,7 @@ function loadExaminerTrendPage(examinerName) {
             </div>
             <div class="flex items-center">
                 <span class="status-dot ${statusClass}"></span>
-                <span class="text-sm font-medium ${textClass}">${statusText} (r=${isNaN(r) ? 'N/A' : r.toFixed(3)})</span>
+                <span class="text-sm font-medium ${textClass}">${statusText} (${formatRWithN(r, session.n)})</span>
             </div>
         `;
         button.addEventListener('click', () => {
@@ -706,7 +743,7 @@ function updateOverallKpiR(avgR, validCount) {
     const textEl = document.getElementById('trend_kpi_r_text');
     
     valueEl.textContent = isNaN(avgR) ? 'N/A' : avgR.toFixed(3);
-    textEl.textContent = `(基於 ${validCount} 筆有效數據)`;
+    textEl.textContent = `(n = ${validCount} 筆有效場次)`;
 
     if (isNaN(avgR)) {
         iconEl.className = 'w-12 h-12 rounded-full flex items-center justify-center mr-4 bg-gray-500';
@@ -743,8 +780,9 @@ function renderTrendChart(trendData) {
     // (V15) 點的顏色： N/A 為灰色
     const pointColors = trendData.map(d => getRColor(d.r, 'hex'));
     const chartLabels = trendData.map(d => formatISODate(d.date));
-    // (V15) 數據：N/A 轉為 0，以便繪製在 Y 軸底部
-    const chartData = trendData.map(d => isNaN(d.r) ? 0 : d.r); 
+    // N/A 使用 null 讓趨勢線中斷；另以灰色菱形標記在 N/A 輔助列，避免誤認為 r=0
+    const chartData = trendData.map(d => Number.isFinite(d.r) ? d.r : null);
+    const invalidPointData = trendData.map((d, index) => Number.isFinite(d.r) ? null : { x: chartLabels[index], y: -0.06, trendIndex: index });
 
     trendChartInstance = new Chart(ctx, {
         type: 'line',
@@ -752,43 +790,49 @@ function renderTrendChart(trendData) {
             labels: chartLabels,
             datasets: [{
                 label: '相關係數 (r)',
-                data: chartData, // (V15) 使用轉換後的數據
+                data: chartData,
                 fill: false,
                 tension: 0.1, 
-                spanGaps: true, // (V15) 連接 N/A (0) 的點
+                spanGaps: false, // N/A 使用 null，不將無效點硬連線
                 pointRadius: 6,
                 pointHoverRadius: 8,
-                pointBackgroundColor: pointColors, // N/A 的點會是灰色
+                pointBackgroundColor: pointColors,
                 pointBorderColor: 'rgba(255, 255, 255, 0.8)',
                 pointBorderWidth: 1,
                 
-                // (V15) 新增：線條樣式 (N/A -> Valid 設為虛線)
                 segment: {
                     borderColor: (ctx) => {
-                        const p0 = trendData[ctx.p0DataIndex];
-                        const p1 = trendData[ctx.p1DataIndex];
-                        // 檢查前一個點或當前點是否為 N/A
-                        if ((p0 && isNaN(p0.r)) || (p1 && isNaN(p1.r))) {
-                            return 'rgba(156, 163, 175, 0.7)'; // 虛線使用灰色
-                        }
                         return 'rgba(156, 163, 175, 0.5)'; // 預設實線顏色
                     },
                     borderDash: (ctx) => {
-                        const p0 = trendData[ctx.p0DataIndex];
-                        const p1 = trendData[ctx.p1DataIndex];
-                        if ((p0 && isNaN(p0.r)) || (p1 && isNaN(p1.r))) {
-                            return [6, 6]; // [虛線長度, 間隔長度]
-                        }
-                        return undefined; // 實線
+                        return undefined; // N/A 為 null，Chart.js 不連線
                     }
                 }
+            }, {
+                type: 'scatter',
+                label: 'N/A（資料無效或樣本不足）',
+                data: invalidPointData,
+                showLine: false,
+                pointRadius: 6,
+                pointHoverRadius: 8,
+                pointStyle: 'rectRot',
+                pointBackgroundColor: COLORS.GRAY,
+                pointBorderColor: 'rgba(255, 255, 255, 0.8)',
+                pointBorderWidth: 1
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
             scales: {
-                y: { title: { display: true, text: '相關係數 (r)' }, min: 0, max: 1.0 },
+                y: {
+                    title: { display: true, text: '相關係數 (r)' },
+                    min: -0.1,
+                    max: 1.0,
+                    ticks: {
+                        callback: (value) => value < 0 ? 'N/A' : value
+                    }
+                },
                 x: { title: { display: true, text: '評核場次 (依日期排序)' } }
             },
             plugins: {
@@ -796,15 +840,19 @@ function renderTrendChart(trendData) {
                 tooltip: {
                     callbacks: {
                         title: (context) => context[0].label,
-                        label: (context) => `考站: ${trendData[context.dataIndex].station}`,
+                        label: (context) => {
+                            const sourceIndex = context.dataset.type === 'scatter' ? context.raw.trendIndex : context.dataIndex;
+                            return `考站: ${trendData[sourceIndex].station}`;
+                        },
                         afterLabel: (context) => {
                             // (V15) 讀取原始 r 值來判斷
-                            const originalR = trendData[context.dataIndex].r;
+                            const sourceIndex = context.dataset.type === 'scatter' ? context.raw.trendIndex : context.dataIndex;
+                            const originalR = trendData[sourceIndex].r;
                             if (isNaN(originalR)) {
-                                return 'r = N/A (數據無效)';
+                                return `r = N/A，n = ${trendData[sourceIndex].n}，資料無效或樣本不足`;
                             }
                             const r = context.parsed.y;
-                            return `r = ${r.toFixed(3)} (${getRText(r)})`;
+                            return `${formatRWithN(r, trendData[sourceIndex].n)} (${getRText(r)})`;
                         }
                     }
                 }
@@ -879,22 +927,23 @@ function renderSessionDetailDynamicContent(sessionData, examinerData) {
 
     const xData = filteredScores.map(s => s.global);
     const yData = filteredScores.map(s => s.total);
-    const r = pearsonCorrelation(xData, yData);
+    const stat = calculateSessionR(filteredScores);
+    const r = stat.r;
     const sigmaX = stdDev(xData);
     const sigmaY = stdDev(yData);
 
     document.getElementById('detail_studentCount').textContent = `評核人數：${filteredScores.length} 人`;
 
-    renderSessionKpis(r, sigmaX, sigmaY);
+    renderSessionKpis(r, sigmaX, sigmaY, filteredScores.length);
     
     renderSessionScatterPlot(filteredScores, r, passingScore);
     
     // (V17) 傳入 examinerData (用於 avgR 比較) -> 移除
-    renderFeedback(r, sigmaX, sigmaY);
+    renderFeedback(r, sigmaX, sigmaY, filteredScores.length);
 }
 
 
-function renderSessionKpis(r, sigmaX, sigmaY) {
+function renderSessionKpis(r, sigmaX, sigmaY, n) {
     const iconREl = document.getElementById('detail_kpi-r-icon');
     const valueREl = document.getElementById('detail_kpi-r-value');
     const textREl = document.getElementById('detail_kpi-r-text');
@@ -904,7 +953,7 @@ function renderSessionKpis(r, sigmaX, sigmaY) {
         iconREl.className = 'w-12 h-12 rounded-full flex items-center justify-center mr-4 bg-gray-500';
         iconREl.innerHTML = iconError;
         valueREl.textContent = 'N/A';
-        textREl.textContent = '數據無效 (σX = 0)';
+        textREl.textContent = `n = ${n}，${getRValidityText(r, n)}`;
         textREl.className = 'text-sm font-medium text-gray-500';
     } else {
          const colorHex = getRColor(r, 'hex');
@@ -913,7 +962,7 @@ function renderSessionKpis(r, sigmaX, sigmaY) {
          textREl.className = `text-sm font-medium`;
          textREl.style.color = colorHex;
          valueREl.textContent = r.toFixed(3);
-         textREl.textContent = `${rText}`; 
+         textREl.textContent = `n = ${n}，${rText}，${getRValidityText(r, n)}`;
          
          if (r >= 0.9) iconREl.innerHTML = iconCheckBright;
          else if (r >= 0.7) iconREl.innerHTML = iconCheck;
@@ -952,7 +1001,7 @@ function renderSessionScatterPlot(scores, r, passingScore) {
     // *** FIX HERE ***
     // Was: const dataPoints = scores.map(s => ({ x: s.global, y s.total }));
     const dataPoints = scores.map(s => ({ x: s.global, y: s.total }));
-    const rText = isNaN(r) ? 'N/A (數據無效)' : r.toFixed(3);
+    const rText = formatRWithN(r, scores.length);
     
     if (sessionChartInstance) sessionChartInstance.destroy();
 
@@ -992,7 +1041,7 @@ function renderSessionScatterPlot(scores, r, passingScore) {
                 },
                 title: {
                     display: true,
-                    text: `相關係數 r = ${rText}`,
+                    text: `相關係數 ${rText}`,
                     font: { size: 16 },
                     color: '#333'
                 }
@@ -1026,7 +1075,7 @@ function renderSessionScatterPlot(scores, r, passingScore) {
 /**
  * (V17) 修正：移除所有長期分析，只專注於當前場次的 r, sigmaX, sigmaY
  */
-function renderFeedback(r, sigmaX, sigmaY) {
+function renderFeedback(r, sigmaX, sigmaY, n) {
     const feedbackEl = document.getElementById('feedbackContent');
     feedbackEl.innerHTML = '';
     let problems = [], positives = [], suggestions = [];
@@ -1034,9 +1083,14 @@ function renderFeedback(r, sigmaX, sigmaY) {
     const bold = (text) => `<span class="font-bold">${text}</span>`;
 
     // --- r (效度) 分析 ---
-    if (isNaN(r) || sigmaX === 0) {
+    if (n < 3) {
+        problems.push(`${bold(`樣本不足 (n = ${n})：`)} 本場次少於 3 筆資料，依規則不計算 $r$，請勿解讀為效度極差。`);
+        suggestions.push(`${bold('補足樣本後再判讀：')} 建議累積至少 3 筆才計算 $r$；n < 8 時仍需標示「樣本數偏少，僅供參考」。`);
+    } else if (isNaN(r) || sigmaX === 0) {
         problems.push(`${bold('Global Rating 數據無效 (本場次)：')} 考官給予所有考生的「整體表現」分數均相同 ($\sigma_X = ${sigmaX.toFixed(2)}$)。這導致 $r$ 值無法計算，其數據${bold('無法')}用於標準設定。`);
         suggestions.push(`${bold('(最優先) 請使用 Global Rating 量尺：')} 考官的職責包含使用「整體表現」(X) 來標定考生的水平 (例如：不及格、及格邊緣、通過)。請務必將您在 Checklist (Y) 上觀察到的差異，同步反映在「整體表現」(X) 的評分上。`);
+    } else if (n < 8) {
+        suggestions.push(`${bold(`樣本數偏少 (n = ${n})：`)} 目前 $r = ${r.toFixed(3)}$ 可供初步參考，但不宜作為穩定結論。`);
     } else if (r < 0.5) {
         problems.push(`${bold(`Global Rating 效度低 (r = ${r.toFixed(3)})：`)} 考官的「整體表現」(X) 判斷與其「總分」(Y) 評分存在${bold('顯著不一致')}。這可能代表考官對 Global Rating 的定義理解有誤，或評分時有 logique 矛盾。`);
         suggestions.push(`${bold('校準評分標準：')} 請重新檢視「整體表現」的評分標準。高總分 (Y) 的考生應獲得高整體表現 (X) 評分，反之亦然。`);
