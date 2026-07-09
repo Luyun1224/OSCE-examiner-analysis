@@ -14,6 +14,8 @@ let currentDept = 'all';
 let currentSessionScores = []; 
 let stationComparisonSort = { key: 'r', direction: 'asc' };
 let stationComparisonLightFilter = 'all';
+let selectedQuickLessonStation = '';
+let selectedQuickLessonDate = '';
 
 
 let trendChartInstance = null; 
@@ -43,6 +45,9 @@ const studentTitleCountEl = document.getElementById('studentTitleCount');
 const viewToggleExaminerEl = document.getElementById('viewToggleExaminer');
 const viewToggleSessionEl = document.getElementById('viewToggleSession');
 const homeButtonEl = document.getElementById('homeButton'); // (V18) 新增
+const lessonQuickSelectEl = document.getElementById('lessonQuickSelect');
+const lessonOccurrenceSelectEl = document.getElementById('lessonOccurrenceSelect');
+const lessonQuickComparisonContentEl = document.getElementById('lessonQuickComparisonContent');
 
 // --- 輔助函數 (數學) ---
 const mean = (arr) => arr.length === 0 ? NaN : arr.reduce((acc, val) => acc + val, 0) / arr.length;
@@ -269,6 +274,112 @@ function renderStationComparisonTable(station) {
             </div>
         </div>
     `;
+}
+
+
+function getLessonOptions(sessionSummaryData) {
+    const lessonMap = new Map();
+    Object.values(sessionSummaryData).forEach(sessionSummary => {
+        Object.values(sessionSummary.stations || {}).forEach(station => {
+            const stationName = station.station;
+            if (!stationName) return;
+            if (!lessonMap.has(stationName)) {
+                lessonMap.set(stationName, { station: stationName, occurrenceCount: 0, examinerAssignments: 0, studentCount: 0 });
+            }
+            const lesson = lessonMap.get(stationName);
+            const examiners = Object.values(station.examiners || {});
+            lesson.occurrenceCount += 1;
+            lesson.examinerAssignments += examiners.length;
+            lesson.studentCount += examiners.reduce((sum, examiner) => sum + (examiner.scores || []).length, 0);
+        });
+    });
+
+    return Array.from(lessonMap.values()).sort((a, b) => a.station.localeCompare(b.station, 'zh-Hant'));
+}
+
+function getFilteredLessonOccurrences(sessionSummaryData, stationName) {
+    return Object.values(sessionSummaryData)
+        .flatMap(sessionSummary => Object.values(sessionSummary.stations || {})
+            .filter(station => station.station === stationName)
+            .map(station => ({ ...station, date: sessionSummary.date })))
+        .sort((a, b) => b.date.localeCompare(a.date));
+}
+
+function renderQuickLessonComparison(filteredSessionSummaryData) {
+    if (!lessonQuickSelectEl || !lessonOccurrenceSelectEl || !lessonQuickComparisonContentEl) return;
+
+    const lessonOptions = getLessonOptions(filteredSessionSummaryData);
+    if (selectedQuickLessonStation && !lessonOptions.some(lesson => lesson.station === selectedQuickLessonStation)) {
+        selectedQuickLessonStation = '';
+        selectedQuickLessonDate = '';
+    }
+
+    lessonQuickSelectEl.innerHTML = '<option value="">請選擇教案</option>' + lessonOptions.map(lesson => `
+        <option value="${lesson.station}">${lesson.station}（${lesson.occurrenceCount} 次、${lesson.examinerAssignments} 考官人次）</option>
+    `).join('');
+    lessonQuickSelectEl.value = selectedQuickLessonStation;
+
+    if (!selectedQuickLessonStation) {
+        lessonOccurrenceSelectEl.innerHTML = '<option value="">請先選擇教案</option>';
+        lessonOccurrenceSelectEl.disabled = true;
+        lessonQuickComparisonContentEl.innerHTML = '<div class="rounded-lg bg-gray-50 p-4 text-sm text-gray-600">請先從上方選擇教案／考站，即可在首頁直接查看同站考官比較與跨年度教案效度。</div>';
+        return;
+    }
+
+    const occurrences = getFilteredLessonOccurrences(filteredSessionSummaryData, selectedQuickLessonStation);
+    if (!occurrences.length) {
+        selectedQuickLessonDate = '';
+        lessonOccurrenceSelectEl.innerHTML = '<option value="">目前篩選下無資料</option>';
+        lessonOccurrenceSelectEl.disabled = true;
+        lessonQuickComparisonContentEl.innerHTML = '<div class="rounded-lg bg-gray-50 p-4 text-sm text-gray-600">目前年度／科別篩選下沒有這份教案資料。</div>';
+        return;
+    }
+
+    if (!selectedQuickLessonDate || !occurrences.some(occurrence => occurrence.date === selectedQuickLessonDate)) {
+        selectedQuickLessonDate = occurrences[0].date;
+    }
+
+    lessonOccurrenceSelectEl.disabled = false;
+    lessonOccurrenceSelectEl.innerHTML = occurrences.map(occurrence => {
+        const examiners = Object.values(occurrence.examiners || {});
+        const studentCount = examiners.reduce((sum, examiner) => sum + (examiner.scores || []).length, 0);
+        return `<option value="${occurrence.date}">${formatISODate(occurrence.date)}（${examiners.length} 位考官、${studentCount} 評分人次）</option>`;
+    }).join('');
+    lessonOccurrenceSelectEl.value = selectedQuickLessonDate;
+
+    const selectedOccurrence = occurrences.find(occurrence => occurrence.date === selectedQuickLessonDate) || occurrences[0];
+    const examinerCount = Object.keys(selectedOccurrence.examiners || {}).length;
+    const occurrenceSummaries = collectLessonOccurrences(selectedQuickLessonStation).map(summarizeLessonOccurrence);
+    const validRs = occurrenceSummaries.map(summary => summary.avgR).filter(Number.isFinite);
+
+    lessonQuickComparisonContentEl.innerHTML = `
+        <div class="mb-3 grid grid-cols-1 gap-3 text-sm text-gray-600 sm:grid-cols-4">
+            <div class="rounded-lg bg-blue-50 p-3"><span class="font-semibold text-blue-800">目前日期：</span>${formatISODate(selectedOccurrence.date)}</div>
+            <div class="rounded-lg bg-blue-50 p-3"><span class="font-semibold text-blue-800">同日考官：</span>${examinerCount} 位</div>
+            <div class="rounded-lg bg-indigo-50 p-3"><span class="font-semibold text-indigo-800">歷年施測：</span>${occurrenceSummaries.length} 次</div>
+            <div class="rounded-lg bg-indigo-50 p-3"><span class="font-semibold text-indigo-800">歷年平均 r：</span>${formatNumber(mean(validRs), 3)}</div>
+        </div>
+        ${examinerCount < 2 ? '<div class="rounded-lg bg-gray-50 p-4 text-sm text-gray-600">此日期目前只有 1 位考官資料，無法比較不同考官。</div>' : renderStationComparisonTable(selectedOccurrence)}
+        ${renderCrossYearLessonComparison({ date: selectedOccurrence.date, station: selectedQuickLessonStation }, selectedOccurrence)}
+    `;
+
+    lessonQuickComparisonContentEl.querySelectorAll('.station-sort').forEach(button => {
+        button.addEventListener('click', () => {
+            const key = button.dataset.sortKey;
+            if (stationComparisonSort.key === key) {
+                stationComparisonSort.direction = stationComparisonSort.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                stationComparisonSort = { key, direction: ['name', 'department', 'station', 'strictness'].includes(key) ? 'asc' : 'desc' };
+            }
+            renderQuickLessonComparison(filteredSessionSummaryData);
+        });
+    });
+    lessonQuickComparisonContentEl.querySelectorAll('.station-light-filter').forEach(button => {
+        button.addEventListener('click', () => {
+            stationComparisonLightFilter = button.dataset.lightFilter;
+            renderQuickLessonComparison(filteredSessionSummaryData);
+        });
+    });
 }
 
 function getSameLessonStation(date, stationName) {
@@ -702,6 +813,7 @@ function renderOverallDashboard(sortedExaminers, allSessionRs, filteredSessionSu
     });
     
     renderRDistributionChart(dist);
+    renderQuickLessonComparison(filteredSessionSummaryData);
 }
 
 /**
@@ -1552,6 +1664,17 @@ async function initApp() {
             });
         });
         
+        lessonQuickSelectEl.addEventListener('change', () => {
+            selectedQuickLessonStation = lessonQuickSelectEl.value;
+            selectedQuickLessonDate = '';
+            runAnalysisAndRender();
+        });
+        lessonOccurrenceSelectEl.addEventListener('change', () => {
+            selectedQuickLessonDate = lessonOccurrenceSelectEl.value;
+            const { filteredSessionSummaryData } = getFilteredData(currentYear, currentDept);
+            renderQuickLessonComparison(filteredSessionSummaryData);
+        });
+
         viewToggleExaminerEl.addEventListener('click', () => {
             currentView = 'examiner';
             viewToggleExaminerEl.classList.add('active');
