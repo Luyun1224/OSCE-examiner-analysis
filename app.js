@@ -305,6 +305,50 @@ function getFilteredLessonOccurrences(sessionSummaryData, stationName) {
         .sort((a, b) => b.date.localeCompare(a.date));
 }
 
+
+function renderCurrentScoringExaminers(station, highlightName = '') {
+    const examiners = Object.values(station.examiners || {})
+        .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hant'));
+
+    if (!examiners.length) {
+        return '<div class="rounded-2xl liquid-muted p-4 text-sm text-slate-500">本梯次尚無考官資料。</div>';
+    }
+
+    const cards = examiners.map(examiner => {
+        const stat = calculateSessionR(examiner.scores || []);
+        const r = stat.r;
+        const isCurrent = highlightName && examiner.name === highlightName;
+        return `
+            <div class="liquid-examiner-chip ${isCurrent ? 'is-current' : ''}">
+                <div class="flex items-start justify-between gap-3">
+                    <div>
+                        <div class="font-bold text-slate-900">${examiner.name || 'N/A'}</div>
+                        <div class="mt-1 text-xs text-slate-500">${examiner.department || 'N/A'} · ${stat.n} 評分人次</div>
+                    </div>
+                    ${isCurrent ? '<span class="liquid-current-badge">目前查看</span>' : ''}
+                </div>
+                <div class="mt-3 flex items-center text-sm font-semibold">
+                    <span class="status-dot ${getRColor(r, 'class')}"></span>
+                    <span style="color: ${getRColor(r, 'hex')}">r = ${formatNumber(r, 3)}</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    return `
+        <div class="mb-4 rounded-3xl liquid-panel p-4">
+            <div class="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                    <h4 class="text-lg font-bold text-slate-900">當梯次評分考官</h4>
+                    <p class="text-xs text-slate-500">列出此日期、此教案／考站實際參與評分的考官，方便與下方效度比較表交叉檢視。</p>
+                </div>
+                <span class="text-sm font-semibold text-blue-700">共 ${examiners.length} 位</span>
+            </div>
+            <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">${cards}</div>
+        </div>
+    `;
+}
+
 function renderQuickLessonComparison(filteredSessionSummaryData) {
     if (!lessonQuickSelectEl || !lessonOccurrenceSelectEl || !lessonQuickComparisonContentEl) return;
 
@@ -359,6 +403,7 @@ function renderQuickLessonComparison(filteredSessionSummaryData) {
             <div class="rounded-lg bg-indigo-50 p-3"><span class="font-semibold text-indigo-800">歷年施測：</span>${occurrenceSummaries.length} 次</div>
             <div class="rounded-lg bg-indigo-50 p-3"><span class="font-semibold text-indigo-800">歷年平均 r：</span>${formatNumber(mean(validRs), 3)}</div>
         </div>
+        ${renderCurrentScoringExaminers(selectedOccurrence)}
         ${examinerCount < 2 ? '<div class="rounded-lg bg-gray-50 p-4 text-sm text-gray-600">此日期目前只有 1 位考官資料，無法比較不同考官。</div>' : renderStationComparisonTable(selectedOccurrence)}
         ${renderCrossYearLessonComparison({ date: selectedOccurrence.date, station: selectedQuickLessonStation }, selectedOccurrence)}
     `;
@@ -534,6 +579,7 @@ function renderSameLessonComparison(sessionData) {
             <div class="rounded-lg bg-blue-50 p-3"><span class="font-semibold text-blue-800">教案／考站：</span>${sameLessonStation.station || sessionData.station}</div>
             <div class="rounded-lg bg-blue-50 p-3"><span class="font-semibold text-blue-800">考官數：</span>${examinerCount} 位</div>
         </div>
+        ${renderCurrentScoringExaminers(sameLessonStation, sessionData.name)}
         ${sameDayComparisonHtml}
         ${renderCrossYearLessonComparison(sessionData, sameLessonStation)}
     `;
