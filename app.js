@@ -271,6 +271,57 @@ function renderStationComparisonTable(station) {
     `;
 }
 
+function getSameLessonStation(date, stationName) {
+    const sessionSummary = allSessionSummaryData[date];
+    if (!sessionSummary || !sessionSummary.stations) return null;
+
+    return Object.values(sessionSummary.stations).find(station => station.station === stationName) || null;
+}
+
+function renderSameLessonComparison(sessionData) {
+    const container = document.getElementById('sameLessonComparisonContent');
+    if (!container) return;
+
+    const sameLessonStation = getSameLessonStation(sessionData.date, sessionData.station);
+    if (!sameLessonStation) {
+        container.innerHTML = `<div class="rounded-lg bg-gray-50 p-4 text-sm text-gray-600">找不到同日期同教案／考站的彙整資料，無法進行不同考官比較。</div>`;
+        return;
+    }
+
+    const examinerCount = Object.keys(sameLessonStation.examiners || {}).length;
+    if (examinerCount < 2) {
+        container.innerHTML = `<div class="rounded-lg bg-gray-50 p-4 text-sm text-gray-600">此教案／考站目前只有 1 位考官資料，無法比較不同考官。</div>`;
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="mb-3 grid grid-cols-1 gap-3 text-sm text-gray-600 sm:grid-cols-3">
+            <div class="rounded-lg bg-blue-50 p-3"><span class="font-semibold text-blue-800">評核日期：</span>${formatISODate(sessionData.date)}</div>
+            <div class="rounded-lg bg-blue-50 p-3"><span class="font-semibold text-blue-800">教案／考站：</span>${sameLessonStation.station || sessionData.station}</div>
+            <div class="rounded-lg bg-blue-50 p-3"><span class="font-semibold text-blue-800">考官數：</span>${examinerCount} 位</div>
+        </div>
+        ${renderStationComparisonTable(sameLessonStation)}
+    `;
+
+    container.querySelectorAll('.station-sort').forEach(button => {
+        button.addEventListener('click', () => {
+            const key = button.dataset.sortKey;
+            if (stationComparisonSort.key === key) {
+                stationComparisonSort.direction = stationComparisonSort.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                stationComparisonSort = { key, direction: ['name', 'department', 'station', 'strictness'].includes(key) ? 'asc' : 'desc' };
+            }
+            renderSameLessonComparison(sessionData);
+        });
+    });
+    container.querySelectorAll('.station-light-filter').forEach(button => {
+        button.addEventListener('click', () => {
+            stationComparisonLightFilter = button.dataset.lightFilter;
+            renderSameLessonComparison(sessionData);
+        });
+    });
+}
+
 function getSampleValidity(n) {
     if (n < 3) return { canCalculate: false, label: '樣本不足', className: 'text-red-600' };
     if (n < 8) return { canCalculate: true, label: '樣本數偏少，僅供參考', className: 'text-orange-600' };
@@ -1107,6 +1158,7 @@ function renderSessionDetailDynamicContent(sessionData, examinerData) {
     renderSessionKpis(r, sigmaX, sigmaY, filteredScores.length);
     
     renderSessionScatterPlot(filteredScores, r, passingScore);
+    renderSameLessonComparison(sessionData);
     
     // (V17) 傳入 examinerData (用於 avgR 比較) -> 移除
     renderFeedback(r, sigmaX, sigmaY, filteredScores.length, examinerData);
