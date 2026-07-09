@@ -38,3 +38,146 @@ body {
 .station-comparison-table .status-dot {
     margin-right: 0.35rem;
 }
+
+:root {
+    --liquid-bg: #eaf4ff;
+    --liquid-ink: #0d1b3d;
+    --liquid-muted: #5f7195;
+    --liquid-blue: #3b82f6;
+    --liquid-cyan: #15b8c5;
+    --liquid-violet: #6457f5;
+    --liquid-amber: #f59e0b;
+    --liquid-glass: rgba(255, 255, 255, 0.62);
+    --liquid-border: rgba(255, 255, 255, 0.78);
+    --liquid-shadow: 0 24px 70px rgba(41, 82, 150, 0.18);
+}
+
+body {
+    color: var(--liquid-ink);
+    background:
+        radial-gradient(circle at 8% 0%, rgba(64, 132, 255, 0.24), transparent 30rem),
+        radial-gradient(circle at 82% 8%, rgba(117, 211, 255, 0.25), transparent 28rem),
+        radial-gradient(circle at 44% 80%, rgba(115, 91, 255, 0.13), transparent 32rem),
+        linear-gradient(135deg, #f8fbff 0%, #eaf4ff 42%, #dfeafe 100%);
+    background-attachment: fixed;
+}
+
+body::before {
+    content: "";
+    position: fixed;
+    inset: auto -4rem -5rem auto;
+    width: min(42vw, 42rem);
+    height: min(22vw, 20rem);
+    background: url("Chimei.png") center / contain no-repeat;
+    opacity: 0.10;
+    filter: grayscale(20%) saturate(70%);
+    pointer-events: none;
+    z-index: 0;
+}
+
+header,
+aside,
+main > div > .bg-white,
+section.bg-white,
+#sessionDetailContent > .bg-white,
+#sessionDetailPage > .bg-white,
+#examinerTrendPage > .bg-white,
+#sessionSummaryStations > .bg-white,
+#overallDashboardPage .bg-white {
+    background: linear-gradient(145deg, rgba(255,255,255,0.76), rgba(244,250,255,0.48)) !important;
+    border: 1px solid var(--liquid-border);
+    box-shadow: var(--liquid-shadow);
+    backdrop-filter: blur(22px) saturate(140%);
+    -webkit-backdrop-filter: blur(22px) saturate(140%);
+}
+
+header {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.75);
+}
+
+aside {
+    border-right: 1px solid rgba(255, 255, 255, 0.7);
+}
+
+main, aside, header { position: relative; z-index: 1; }
+
+.rounded-lg,
+.rounded-md,
+section.bg-white,
+#sessionSummaryStations > div,
+#examinerTrendPage > div,
+#sessionDetailContent > div {
+    border-radius: 1.35rem !important;
+}
+
+button,
+select,
+input {
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+
+select,
+input[type="text"] {
+    background: rgba(255, 255, 255, 0.68) !important;
+    border: 1px solid rgba(166, 190, 225, 0.58) !important;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.85), 0 10px 28px rgba(31, 80, 154, 0.08) !important;
+}
+
+button:hover,
+#examinerMasterList button:hover,
+#sessionMasterList button:hover {
+    transform: translateY(-1px);
+}
+
+#examinerMasterList button,
+#sessionMasterList button,
+.station-comparison-table,
+table {
+    background: rgba(255, 255, 255, 0.44);
+    border-color: rgba(178, 199, 230, 0.44) !important;
+    overflow: hidden;
+}
+
+.view-toggle-btn.active {
+    color: #2456d8;
+    border-bottom-color: transparent;
+    background: linear-gradient(90deg, rgba(59,130,246,0.14), rgba(21,184,197,0.12));
+    box-shadow: inset 0 -3px 0 rgba(59, 130, 246, 0.85);
+}
+
+.liquid-panel {
+    background:
+        linear-gradient(145deg, rgba(255,255,255,0.72), rgba(239,248,255,0.44)),
+        radial-gradient(circle at 12% 0%, rgba(59,130,246,0.15), transparent 16rem);
+    border: 1px solid rgba(255,255,255,0.78);
+    box-shadow: 0 18px 48px rgba(40, 89, 160, 0.14);
+    backdrop-filter: blur(18px) saturate(135%);
+}
+
+.liquid-muted {
+    background: rgba(241, 247, 255, 0.58);
+    border: 1px solid rgba(207, 222, 243, 0.74);
+}
+
+.liquid-examiner-chip {
+    border: 1px solid rgba(184, 207, 238, 0.65);
+    border-radius: 1.15rem;
+    background: linear-gradient(145deg, rgba(255,255,255,0.78), rgba(236,248,255,0.48));
+    padding: 1rem;
+    box-shadow: 0 14px 32px rgba(48, 94, 164, 0.10);
+}
+
+.liquid-examiner-chip.is-current {
+    border-color: rgba(59, 130, 246, 0.72);
+    box-shadow: 0 18px 42px rgba(59, 130, 246, 0.20);
+}
+
+.liquid-current-badge {
+    white-space: nowrap;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--liquid-blue), var(--liquid-cyan));
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 800;
+    padding: 0.22rem 0.62rem;
+}
