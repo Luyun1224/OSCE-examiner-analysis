@@ -278,6 +278,130 @@ function getSameLessonStation(date, stationName) {
     return Object.values(sessionSummary.stations).find(station => station.station === stationName) || null;
 }
 
+
+function collectLessonOccurrences(stationName) {
+    return Object.values(allSessionSummaryData)
+        .flatMap(sessionSummary => Object.values(sessionSummary.stations || {})
+            .filter(station => station.station === stationName)
+            .map(station => ({ ...station, date: sessionSummary.date })))
+        .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function summarizeLessonOccurrence(occurrence) {
+    const examiners = Object.values(occurrence.examiners || {});
+    const allScores = examiners.flatMap(examiner => examiner.scores || []);
+    const checklistScores = allScores.map(score => Number(score.total)).filter(Number.isFinite);
+    const globalRatings = allScores.map(score => Number(score.global)).filter(Number.isFinite);
+    const examinerStats = examiners.map(examiner => calculateSessionR(examiner.scores || []));
+    const validRs = examinerStats.map(stat => stat.r).filter(Number.isFinite);
+    const passRates = examiners
+        .map(examiner => calculatePassRate(examiner.scores || [], examiner.passingScore))
+        .filter(Number.isFinite);
+
+    return {
+        date: occurrence.date,
+        year: (occurrence.date || '').slice(0, 4) || 'N/A',
+        examinerCount: examiners.length,
+        studentCount: allScores.length,
+        validExaminerCount: validRs.length,
+        avgR: mean(validRs),
+        avgChecklist: mean(checklistScores),
+        avgGlobal: mean(globalRatings),
+        sdChecklist: stdDev(checklistScores),
+        sdGlobal: stdDev(globalRatings),
+        avgPassRate: mean(passRates)
+    };
+}
+
+function summarizeLessonByYear(occurrenceSummaries) {
+    const byYear = new Map();
+    occurrenceSummaries.forEach(summary => {
+        if (!byYear.has(summary.year)) byYear.set(summary.year, []);
+        byYear.get(summary.year).push(summary);
+    });
+
+    return Array.from(byYear.entries()).map(([year, summaries]) => {
+        const validRs = summaries.map(summary => summary.avgR).filter(Number.isFinite);
+        const passRates = summaries.map(summary => summary.avgPassRate).filter(Number.isFinite);
+        return {
+            year,
+            occurrenceCount: summaries.length,
+            examinerCount: summaries.reduce((sum, summary) => sum + summary.examinerCount, 0),
+            studentCount: summaries.reduce((sum, summary) => sum + summary.studentCount, 0),
+            avgR: mean(validRs),
+            avgChecklist: mean(summaries.map(summary => summary.avgChecklist).filter(Number.isFinite)),
+            avgGlobal: mean(summaries.map(summary => summary.avgGlobal).filter(Number.isFinite)),
+            avgSdChecklist: mean(summaries.map(summary => summary.sdChecklist).filter(Number.isFinite)),
+            avgSdGlobal: mean(summaries.map(summary => summary.sdGlobal).filter(Number.isFinite)),
+            avgPassRate: mean(passRates)
+        };
+    }).sort((a, b) => a.year.localeCompare(b.year));
+}
+
+function renderCrossYearLessonComparison(sessionData, sameLessonStation) {
+    const occurrences = collectLessonOccurrences(sameLessonStation.station || sessionData.station);
+    const occurrenceSummaries = occurrences.map(summarizeLessonOccurrence);
+    const yearlySummaries = summarizeLessonByYear(occurrenceSummaries);
+    const totalStudentCount = occurrenceSummaries.reduce((sum, summary) => sum + summary.studentCount, 0);
+    const totalExaminerAssignments = occurrenceSummaries.reduce((sum, summary) => sum + summary.examinerCount, 0);
+
+    const yearRows = yearlySummaries.length ? yearlySummaries.map(row => `
+        <tr class="border-t border-gray-100 hover:bg-gray-50 ${row.year === String(sessionData.date || '').slice(0, 4) ? 'bg-blue-50/60' : ''}">
+            <td class="px-3 py-2 font-semibold text-gray-900">${row.year}</td>
+            <td class="px-3 py-2">${row.occurrenceCount}</td>
+            <td class="px-3 py-2">${row.examinerCount}</td>
+            <td class="px-3 py-2">${row.studentCount}</td>
+            <td class="px-3 py-2"><span class="status-dot ${getRColor(row.avgR, 'class')}"></span>${formatNumber(row.avgR, 3)}</td>
+            <td class="px-3 py-2">${formatNumber(row.avgChecklist)}</td>
+            <td class="px-3 py-2">${formatNumber(row.avgGlobal)}</td>
+            <td class="px-3 py-2">${formatNumber(row.avgSdChecklist)}</td>
+            <td class="px-3 py-2">${formatNumber(row.avgSdGlobal)}</td>
+            <td class="px-3 py-2">${Number.isFinite(row.avgPassRate) ? `${(row.avgPassRate * 100).toFixed(1)}%` : 'N/A'}</td>
+        </tr>
+    `).join('') : `<tr><td colspan="10" class="px-3 py-6 text-center text-gray-500">找不到跨年度資料。</td></tr>`;
+
+    const occurrenceRows = occurrenceSummaries.map(row => `
+        <tr class="border-t border-gray-100 hover:bg-gray-50 ${row.date === sessionData.date ? 'bg-blue-50/60' : ''}">
+            <td class="px-3 py-2 font-medium text-gray-900">${formatISODate(row.date)}</td>
+            <td class="px-3 py-2">${row.examinerCount}</td>
+            <td class="px-3 py-2">${row.studentCount}</td>
+            <td class="px-3 py-2"><span class="status-dot ${getRColor(row.avgR, 'class')}"></span>${formatNumber(row.avgR, 3)}</td>
+            <td class="px-3 py-2">${formatNumber(row.avgChecklist)}</td>
+            <td class="px-3 py-2">${formatNumber(row.sdChecklist)}</td>
+            <td class="px-3 py-2">${Number.isFinite(row.avgPassRate) ? `${(row.avgPassRate * 100).toFixed(1)}%` : 'N/A'}</td>
+        </tr>
+    `).join('');
+
+    return `
+        <div class="mt-6 border-t border-gray-200 pt-4">
+            <div class="mb-3">
+                <h4 class="text-lg font-bold text-gray-800">同份教案跨年度比較</h4>
+                <p class="text-xs text-gray-500">用同一教案／考站名稱彙整所有年度資料，協助判斷是否為教案本身造成評分不穩定；藍底列為目前查看的年度或日期。</p>
+            </div>
+            <div class="mb-3 grid grid-cols-1 gap-3 text-sm text-gray-600 sm:grid-cols-3">
+                <div class="rounded-lg bg-indigo-50 p-3"><span class="font-semibold text-indigo-800">總考過次數：</span>${occurrences.length} 次</div>
+                <div class="rounded-lg bg-indigo-50 p-3"><span class="font-semibold text-indigo-800">累計考官動用：</span>${totalExaminerAssignments} 人次</div>
+                <div class="rounded-lg bg-indigo-50 p-3"><span class="font-semibold text-indigo-800">累計評分人次：</span>${totalStudentCount} 人</div>
+            </div>
+            <div class="overflow-x-auto mb-4">
+                <table class="min-w-full text-sm text-gray-700">
+                    <thead class="bg-gray-50 text-gray-600"><tr><th class="px-3 py-2 text-left">年度</th><th class="px-3 py-2 text-left">考過次數</th><th class="px-3 py-2 text-left">考官動用</th><th class="px-3 py-2 text-left">評分人次</th><th class="px-3 py-2 text-left">平均 r</th><th class="px-3 py-2 text-left">平均 Checklist</th><th class="px-3 py-2 text-left">平均 Global</th><th class="px-3 py-2 text-left">平均 Checklist SD</th><th class="px-3 py-2 text-left">平均 Global SD</th><th class="px-3 py-2 text-left">平均通過率</th></tr></thead>
+                    <tbody>${yearRows}</tbody>
+                </table>
+            </div>
+            <details class="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <summary class="cursor-pointer font-semibold text-gray-700">展開每次施測明細</summary>
+                <div class="overflow-x-auto mt-3">
+                    <table class="min-w-full text-sm text-gray-700">
+                        <thead class="bg-white text-gray-600"><tr><th class="px-3 py-2 text-left">日期</th><th class="px-3 py-2 text-left">考官數</th><th class="px-3 py-2 text-left">評分人次</th><th class="px-3 py-2 text-left">平均 r</th><th class="px-3 py-2 text-left">平均 Checklist</th><th class="px-3 py-2 text-left">Checklist SD</th><th class="px-3 py-2 text-left">平均通過率</th></tr></thead>
+                        <tbody>${occurrenceRows}</tbody>
+                    </table>
+                </div>
+            </details>
+        </div>
+    `;
+}
+
 function renderSameLessonComparison(sessionData) {
     const container = document.getElementById('sameLessonComparisonContent');
     if (!container) return;
@@ -289,10 +413,9 @@ function renderSameLessonComparison(sessionData) {
     }
 
     const examinerCount = Object.keys(sameLessonStation.examiners || {}).length;
-    if (examinerCount < 2) {
-        container.innerHTML = `<div class="rounded-lg bg-gray-50 p-4 text-sm text-gray-600">此教案／考站目前只有 1 位考官資料，無法比較不同考官。</div>`;
-        return;
-    }
+    const sameDayComparisonHtml = examinerCount < 2
+        ? `<div class="rounded-lg bg-gray-50 p-4 text-sm text-gray-600">此教案／考站目前只有 1 位考官資料，無法比較不同考官。</div>`
+        : renderStationComparisonTable(sameLessonStation);
 
     container.innerHTML = `
         <div class="mb-3 grid grid-cols-1 gap-3 text-sm text-gray-600 sm:grid-cols-3">
@@ -300,7 +423,8 @@ function renderSameLessonComparison(sessionData) {
             <div class="rounded-lg bg-blue-50 p-3"><span class="font-semibold text-blue-800">教案／考站：</span>${sameLessonStation.station || sessionData.station}</div>
             <div class="rounded-lg bg-blue-50 p-3"><span class="font-semibold text-blue-800">考官數：</span>${examinerCount} 位</div>
         </div>
-        ${renderStationComparisonTable(sameLessonStation)}
+        ${sameDayComparisonHtml}
+        ${renderCrossYearLessonComparison(sessionData, sameLessonStation)}
     `;
 
     container.querySelectorAll('.station-sort').forEach(button => {
