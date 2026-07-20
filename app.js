@@ -1281,92 +1281,119 @@ function updateOverallKpiR(avgR, validCount) {
 /**
  * (V15) 修正：渲染趨勢圖
  */
-function renderTrendChart(trendData) {
-    const ctx = document.getElementById('trendChart').getContext('2d');
-    if (trendChartInstance) trendChartInstance.destroy();
-    
-    // (V15) 點的顏色： N/A 為灰色
-    const pointColors = trendData.map(d => getRColor(d.r, 'hex'));
-    const chartLabels = trendData.map(d => formatISODate(d.date));
-    // N/A 使用 null 讓趨勢線中斷；另以灰色菱形標記在 N/A 輔助列，避免誤認為 r=0
-    const chartData = trendData.map(d => Number.isFinite(d.r) ? d.r : null);
-    const invalidPointData = trendData.map((d, index) => Number.isFinite(d.r) ? null : { x: chartLabels[index], y: -0.06, trendIndex: index });
+function escapeSvgText(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
 
-    trendChartInstance = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: chartLabels,
-            datasets: [{
-                label: '相關係數 (r)',
-                data: chartData,
-                fill: false,
-                tension: 0.1, 
-                spanGaps: false, // N/A 使用 null，不將無效點硬連線
-                pointRadius: 6,
-                pointHoverRadius: 8,
-                pointBackgroundColor: pointColors,
-                pointBorderColor: 'rgba(255, 255, 255, 0.8)',
-                pointBorderWidth: 1,
-                
-                segment: {
-                    borderColor: (ctx) => {
-                        return 'rgba(156, 163, 175, 0.5)'; // 預設實線顏色
-                    },
-                    borderDash: (ctx) => {
-                        return undefined; // N/A 為 null，Chart.js 不連線
-                    }
-                }
-            }, {
-                type: 'scatter',
-                label: 'N/A（資料無效或樣本不足）',
-                data: invalidPointData,
-                showLine: false,
-                pointRadius: 6,
-                pointHoverRadius: 8,
-                pointStyle: 'rectRot',
-                pointBackgroundColor: COLORS.GRAY,
-                pointBorderColor: 'rgba(255, 255, 255, 0.8)',
-                pointBorderWidth: 1
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                y: {
-                    title: { display: true, text: '相關係數 (r)' },
-                    min: -0.1,
-                    max: 1.0,
-                    ticks: {
-                        callback: (value) => value < 0 ? 'N/A' : value
-                    }
-                },
-                x: { title: { display: true, text: '評核場次 (依日期排序)' } }
-            },
-            plugins: {
-                legend: { display: false },
-                tooltip: {
-                    callbacks: {
-                        title: (context) => context[0].label,
-                        label: (context) => {
-                            const sourceIndex = context.dataset.type === 'scatter' ? context.raw.trendIndex : context.dataIndex;
-                            return `考站: ${trendData[sourceIndex].station}`;
-                        },
-                        afterLabel: (context) => {
-                            // (V15) 讀取原始 r 值來判斷
-                            const sourceIndex = context.dataset.type === 'scatter' ? context.raw.trendIndex : context.dataIndex;
-                            const originalR = trendData[sourceIndex].r;
-                            if (isNaN(originalR)) {
-                                return `r = N/A，n = ${trendData[sourceIndex].n}，資料無效或樣本不足`;
-                            }
-                            const r = context.parsed.y;
-                            return `${formatRWithN(r, trendData[sourceIndex].n)} (${getRText(r)})`;
-                        }
-                    }
-                }
-            }
+function renderTrendChart(trendData) {
+    const chartEl = document.getElementById('trendChart');
+    const emptyStateEl = document.getElementById('trendChartEmptyState');
+    if (trendChartInstance) {
+        trendChartInstance.destroy();
+        trendChartInstance = null;
+    }
+
+    const validPointCount = trendData.filter(d => Number.isFinite(d.r)).length;
+    chartEl.classList.toggle('hidden', validPointCount === 0);
+    if (emptyStateEl) emptyStateEl.classList.toggle('hidden', validPointCount > 0);
+    if (validPointCount === 0) {
+        chartEl.innerHTML = '';
+        return;
+    }
+
+    const width = 1200;
+    const height = 350;
+    const padding = { top: 24, right: 36, bottom: 70, left: 62 };
+    const plotWidth = width - padding.left - padding.right;
+    const plotHeight = height - padding.top - padding.bottom;
+    const maxIndex = Math.max(trendData.length - 1, 1);
+    const xFor = (index) => padding.left + (index / maxIndex) * plotWidth;
+    const yFor = (r) => padding.top + (1 - r) * plotHeight;
+    const invalidY = padding.top + plotHeight + 18;
+    const yTicks = [1, 0.9, 0.7, 0.5, 0.3, 0];
+
+    const validPoints = trendData
+        .map((d, index) => Number.isFinite(d.r) ? { ...d, index, x: xFor(index), y: yFor(d.r) } : null)
+        .filter(Boolean);
+    const invalidPoints = trendData
+        .map((d, index) => Number.isFinite(d.r) ? null : { ...d, index, x: xFor(index), y: invalidY })
+        .filter(Boolean);
+
+    const lineSegments = [];
+    let currentSegment = [];
+    trendData.forEach((d, index) => {
+        if (Number.isFinite(d.r)) {
+            currentSegment.push(`${xFor(index).toFixed(1)},${yFor(d.r).toFixed(1)}`);
+        } else if (currentSegment.length) {
+            lineSegments.push(currentSegment);
+            currentSegment = [];
         }
     });
+    if (currentSegment.length) lineSegments.push(currentSegment);
+
+    const shouldShowTick = (index) => trendData.length <= 10 || index === 0 || index === trendData.length - 1 || index % Math.ceil(trendData.length / 8) === 0;
+    const axisHtml = `
+        <line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${padding.top + plotHeight}" stroke="#94a3b8" stroke-width="1" />
+        <line x1="${padding.left}" y1="${padding.top + plotHeight}" x2="${padding.left + plotWidth}" y2="${padding.top + plotHeight}" stroke="#94a3b8" stroke-width="1" />
+        ${yTicks.map(tick => {
+            const y = yFor(tick);
+            return `<g><line x1="${padding.left}" y1="${y}" x2="${padding.left + plotWidth}" y2="${y}" stroke="#e5e7eb" stroke-width="1" /><text x="${padding.left - 12}" y="${y + 4}" text-anchor="end" font-size="12" fill="#475569">${tick.toFixed(1)}</text></g>`;
+        }).join('')}
+        <text x="18" y="${padding.top + plotHeight / 2}" transform="rotate(-90 18 ${padding.top + plotHeight / 2})" text-anchor="middle" font-size="13" font-weight="600" fill="#334155">相關係數 (r)</text>
+        <text x="${padding.left + plotWidth / 2}" y="${height - 12}" text-anchor="middle" font-size="13" font-weight="600" fill="#334155">評核場次 (依日期排序)</text>
+    `;
+
+    const linesHtml = lineSegments
+        .filter(segment => segment.length > 1)
+        .map(segment => `<polyline points="${segment.join(' ')}" fill="none" stroke="#64748b" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />`)
+        .join('');
+
+    const validHtml = validPoints.map(point => {
+        const color = getRColor(point.r, 'hex');
+        const date = formatISODate(point.date);
+        const title = `${date}｜${point.station}\n${formatRWithN(point.r, point.n)} (${getRText(point.r)})`;
+        return `<g>
+            <circle cx="${point.x}" cy="${point.y}" r="7" fill="${color}" stroke="white" stroke-width="2">
+                <title>${escapeSvgText(title)}</title>
+            </circle>
+            <text x="${point.x}" y="${point.y - 13}" text-anchor="middle" font-size="12" font-weight="700" fill="${color}">${point.r.toFixed(3)}</text>
+        </g>`;
+    }).join('');
+
+    const invalidHtml = invalidPoints.map(point => {
+        const title = `${formatISODate(point.date)}｜${point.station}\nr = N/A，n = ${point.n}，資料無效或樣本不足`;
+        return `<g transform="translate(${point.x} ${point.y}) rotate(45)">
+            <rect x="-6" y="-6" width="12" height="12" fill="${COLORS.GRAY}" stroke="white" stroke-width="2">
+                <title>${escapeSvgText(title)}</title>
+            </rect>
+        </g>`;
+    }).join('');
+
+    const xLabelsHtml = trendData.map((d, index) => {
+        if (!shouldShowTick(index)) return '';
+        const x = xFor(index);
+        return `<g>
+            <line x1="${x}" y1="${padding.top + plotHeight}" x2="${x}" y2="${padding.top + plotHeight + 5}" stroke="#94a3b8" />
+            <text x="${x}" y="${padding.top + plotHeight + 20}" text-anchor="middle" font-size="11" fill="#475569">${escapeSvgText(formatISODate(d.date))}</text>
+            <text x="${x}" y="${padding.top + plotHeight + 35}" text-anchor="middle" font-size="10" fill="#64748b">${escapeSvgText(d.station || `場次 ${index + 1}`).slice(0, 12)}</text>
+        </g>`;
+    }).join('');
+
+    chartEl.innerHTML = `
+        <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="相關係數 r 穩定性趨勢圖" class="h-full w-full overflow-visible">
+            <rect x="0" y="0" width="${width}" height="${height}" fill="transparent" />
+            ${axisHtml}
+            ${linesHtml}
+            ${validHtml}
+            ${invalidHtml}
+            ${xLabelsHtml}
+        </svg>
+    `;
 }
 
 function loadSessionDetailPage(examinerName, sessionKey) {
