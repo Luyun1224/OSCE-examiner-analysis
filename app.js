@@ -1282,44 +1282,54 @@ function updateOverallKpiR(avgR, validCount) {
  * (V15) 修正：渲染趨勢圖
  */
 function renderTrendChart(trendData) {
-    const ctx = document.getElementById('trendChart').getContext('2d');
+    const canvas = document.getElementById('trendChart');
+    const emptyStateEl = document.getElementById('trendChartEmptyState');
+    const ctx = canvas.getContext('2d');
     if (trendChartInstance) trendChartInstance.destroy();
-    
-    // (V15) 點的顏色： N/A 為灰色
-    const pointColors = trendData.map(d => getRColor(d.r, 'hex'));
-    const chartLabels = trendData.map(d => formatISODate(d.date));
-    // N/A 使用 null 讓趨勢線中斷；另以灰色菱形標記在 N/A 輔助列，避免誤認為 r=0
-    const chartData = trendData.map(d => Number.isFinite(d.r) ? d.r : null);
-    const invalidPointData = trendData.map((d, index) => Number.isFinite(d.r) ? null : { x: chartLabels[index], y: -0.06, trendIndex: index });
+
+    const chartLabels = trendData.map((d, index) => `${formatISODate(d.date)}\n${d.station || `場次 ${index + 1}`}`);
+    const validPointCount = trendData.filter(d => Number.isFinite(d.r)).length;
+
+    canvas.classList.toggle('hidden', validPointCount === 0);
+    if (emptyStateEl) emptyStateEl.classList.toggle('hidden', validPointCount > 0);
+    if (validPointCount === 0) return;
+
+    // Use a numeric x-axis so every assessment session is plotted even when multiple
+    // sessions share the same date label. Invalid r values are still shown as gray
+    // diamonds below the baseline, but they do not break rendering of valid sessions.
+    const validPointData = trendData.map((d, index) => Number.isFinite(d.r) ? {
+        x: index,
+        y: d.r,
+        trendIndex: index
+    } : null);
+    const invalidPointData = trendData
+        .map((d, index) => Number.isFinite(d.r) ? null : { x: index, y: -0.06, trendIndex: index })
+        .filter(Boolean);
 
     trendChartInstance = new Chart(ctx, {
         type: 'line',
         data: {
-            labels: chartLabels,
             datasets: [{
                 label: '相關係數 (r)',
-                data: chartData,
+                data: validPointData,
+                parsing: false,
                 fill: false,
-                tension: 0.1, 
-                spanGaps: false, // N/A 使用 null，不將無效點硬連線
+                tension: 0.1,
+                spanGaps: false,
                 pointRadius: 6,
                 pointHoverRadius: 8,
-                pointBackgroundColor: pointColors,
+                pointBackgroundColor: (context) => {
+                    const index = context.raw?.trendIndex;
+                    return Number.isInteger(index) ? getRColor(trendData[index].r, 'hex') : COLORS.GRAY;
+                },
                 pointBorderColor: 'rgba(255, 255, 255, 0.8)',
                 pointBorderWidth: 1,
-                
-                segment: {
-                    borderColor: (ctx) => {
-                        return 'rgba(156, 163, 175, 0.5)'; // 預設實線顏色
-                    },
-                    borderDash: (ctx) => {
-                        return undefined; // N/A 為 null，Chart.js 不連線
-                    }
-                }
+                borderColor: 'rgba(156, 163, 175, 0.5)'
             }, {
                 type: 'scatter',
                 label: 'N/A（資料無效或樣本不足）',
                 data: invalidPointData,
+                parsing: false,
                 showLine: false,
                 pointRadius: 6,
                 pointHoverRadius: 8,
@@ -1337,38 +1347,44 @@ function renderTrendChart(trendData) {
                     title: { display: true, text: '相關係數 (r)' },
                     min: -0.1,
                     max: 1.0,
-                    ticks: {
-                        callback: (value) => value < 0 ? 'N/A' : value
-                    }
+                    ticks: { callback: (value) => value < 0 ? 'N/A' : value }
                 },
-                x: { title: { display: true, text: '評核場次 (依日期排序)' } }
+                x: {
+                    type: 'linear',
+                    title: { display: true, text: '評核場次 (依日期排序)' },
+                    min: -0.25,
+                    max: Math.max(trendData.length - 0.75, 0.75),
+                    ticks: {
+                        stepSize: 1,
+                        callback: (value) => Number.isInteger(value) && chartLabels[value] ? chartLabels[value].split('\n')[0] : ''
+                    }
+                }
             },
             plugins: {
                 legend: { display: false },
                 tooltip: {
                     callbacks: {
-                        title: (context) => context[0].label,
-                        label: (context) => {
-                            const sourceIndex = context.dataset.type === 'scatter' ? context.raw.trendIndex : context.dataIndex;
-                            return `考站: ${trendData[sourceIndex].station}`;
+                        title: (context) => {
+                            const sourceIndex = context[0].raw?.trendIndex ?? context[0].dataIndex;
+                            return chartLabels[sourceIndex]?.replace('\n', '｜') || '';
                         },
+                        label: (context) => `考站: ${trendData[context.raw.trendIndex].station}`,
                         afterLabel: (context) => {
-                            // (V15) 讀取原始 r 值來判斷
-                            const sourceIndex = context.dataset.type === 'scatter' ? context.raw.trendIndex : context.dataIndex;
+                            const sourceIndex = context.raw.trendIndex;
                             const originalR = trendData[sourceIndex].r;
                             if (isNaN(originalR)) {
                                 return `r = N/A，n = ${trendData[sourceIndex].n}，資料無效或樣本不足`;
                             }
-                            const r = context.parsed.y;
-                            return `${formatRWithN(r, trendData[sourceIndex].n)} (${getRText(r)})`;
+                            return `${formatRWithN(originalR, trendData[sourceIndex].n)} (${getRText(originalR)})`;
                         }
                     }
                 }
             }
         }
     });
-}
 
+    requestAnimationFrame(() => trendChartInstance?.resize());
+}
 function loadSessionDetailPage(examinerName, sessionKey) {
     const examinerData = allExaminerData[examinerName];
     const sessionData = examinerData.sessions[sessionKey];
