@@ -191,6 +191,12 @@
                     <h3 class="text-xl font-bold mb-4">相關係數 ($r$) 穩定性趨勢圖</h3>
                     <div class="chart-container-trend">
                         <canvas id="trendChart"></canvas>
+                        <div id="trendChartEmptyState" class="hidden absolute inset-0 flex items-center justify-center text-center text-gray-500">
+                            <div>
+                                <div class="text-lg font-semibold">沒有可繪製的有效 r 值</div>
+                                <div class="mt-1 text-sm">請確認此考官在目前篩選條件下有至少 3 筆且具變異的 Global Rating / Checklist 資料。</div>
+                            </div>
+                        </div>
                     </div>
                 </section>
                 <section>
