@@ -1297,11 +1297,13 @@ function renderTrendChart(trendData) {
     // Use a numeric x-axis so every assessment session is plotted even when multiple
     // sessions share the same date label. Invalid r values are still shown as gray
     // diamonds below the baseline, but they do not break rendering of valid sessions.
-    const validPointData = trendData.map((d, index) => Number.isFinite(d.r) ? {
-        x: index,
-        y: d.r,
-        trendIndex: index
-    } : null);
+    const validPointData = trendData
+        .map((d, index) => Number.isFinite(d.r) ? {
+            x: index,
+            y: d.r,
+            trendIndex: index
+        } : null)
+        .filter(Boolean);
     const invalidPointData = trendData
         .map((d, index) => Number.isFinite(d.r) ? null : { x: index, y: -0.06, trendIndex: index })
         .filter(Boolean);
